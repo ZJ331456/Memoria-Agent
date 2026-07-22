@@ -4,25 +4,127 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field
 
-from .api_models import (
-    ChatBody, ChatResponse, ErrorResponse, HealthResponse, MemoryBody, MemoryPatch,
-    MemoryResponse, MessageResponse, SessionBody, SessionPatch, SessionResponse,
-    ToolExecuteBody, ToolExecuteResponse, TraceResponse,
-)
 from .config import Settings
 from .llm import LLMClient
 from .service import AgentService
 from .store import Store
 
-VERSION = "0.2.0"
+MemoryKind = Literal["fact", "preference", "profile", "goal", "procedure"]
+
+
+class StrictModel(BaseModel):
+    """Public request bodies reject unknown fields instead of silently ignoring them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ErrorResponse(BaseModel):
+    code: str
+    message: str
+    request_id: str
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    version: str
+
+
+class SessionBody(StrictModel):
+    title: str = Field(default="新对话", min_length=1, max_length=80, examples=["Rust 学习计划"])
+
+
+class SessionPatch(StrictModel):
+    title: str = Field(min_length=1, max_length=80)
+
+
+class SessionResponse(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+
+
+class MessageResponse(BaseModel):
+    id: str
+    session_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: str
+
+
+class ChatBody(StrictModel):
+    content: str = Field(min_length=1, max_length=20000, examples=["请记住我偏好简洁回答"])
+
+
+class MemoryBody(StrictModel):
+    content: str = Field(min_length=1, max_length=4000)
+    kind: MemoryKind = "fact"
+    importance: int = Field(default=3, ge=1, le=5)
+
+
+class MemoryPatch(StrictModel):
+    content: str | None = Field(default=None, min_length=1, max_length=4000)
+    kind: MemoryKind | None = None
+    importance: int | None = Field(default=None, ge=1, le=5)
+
+
+class MemoryResponse(BaseModel):
+    id: str
+    content: str
+    kind: MemoryKind
+    importance: int
+    source: str
+    created_at: str
+    updated_at: str
+
+
+class MemoryReindexResponse(BaseModel):
+    enabled: bool
+    indexed: int
+    remaining: int
+
+
+class TraceResponse(BaseModel):
+    id: str
+    session_id: str
+    status: str
+    steps: int
+    duration_ms: int
+    memories: list[dict[str, Any]]
+    tools: list[dict[str, Any]]
+    error: str | None = None
+    created_at: str
+
+
+class ChatResponse(BaseModel):
+    message: MessageResponse
+    memories_created: list[MemoryResponse]
+    trace: TraceResponse
+
+
+class ToolExecuteBody(StrictModel):
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    confirm_write: bool = False
+
+
+class ToolExecuteResponse(BaseModel):
+    name: str
+    ok: bool
+    content: str
+    elapsed_ms: int
+
+
+VERSION = "0.3.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
     {"name": "sessions", "description": "会话生命周期和消息历史。"},
@@ -142,11 +244,18 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return Response(status_code=204)
 
     @app.get("/api/memories", response_model=list[MemoryResponse], tags=["memories"], summary="搜索长期记忆")
-    def memories(q: str = Query(default="", max_length=200), limit: int = Query(default=100, ge=1, le=500)):
-        return store.memories(q, limit)
+    async def memories(q: str = Query(default="", max_length=200), limit: int = Query(default=100, ge=1, le=500)):
+        return await service.runtime.memory.retrieve(q, limit) if q.strip() else store.memories(limit=limit)
 
     @app.post("/api/memories", response_model=MemoryResponse, status_code=201, tags=["memories"], summary="创建长期记忆")
-    def create_memory(body: MemoryBody): return store.add_memory(body.content, body.kind, body.importance)
+    async def create_memory(body: MemoryBody):
+        item = await service.runtime.memory.add_if_new(body.content, body.kind, body.importance, "manual")
+        if not item: raise HTTPException(409, "已存在相似记忆")
+        return item
+
+    @app.post("/api/memories/reindex", response_model=MemoryReindexResponse, tags=["memories"], summary="回填长期记忆语义向量")
+    async def reindex_memories(limit: int = Query(default=1000, ge=1, le=5000)):
+        return await service.runtime.memory.reindex(limit)
 
     @app.patch("/api/memories/{memory_id}", response_model=MemoryResponse, tags=["memories"], summary="编辑长期记忆")
     def update_memory(memory_id: str, body: MemoryPatch):

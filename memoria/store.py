@@ -35,7 +35,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS memories (
                     id TEXT PRIMARY KEY, content TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'fact',
                     importance INTEGER NOT NULL DEFAULT 3, source TEXT NOT NULL DEFAULT 'manual',
-                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, embedding TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_memories_updated ON memories(updated_at DESC);
                 CREATE TABLE IF NOT EXISTS turn_traces (
@@ -47,6 +47,10 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_traces_session ON turn_traces(session_id, created_at DESC);
             """)
             self.db.commit()
+            memory_columns = {row[1] for row in self.db.execute("PRAGMA table_info(memories)").fetchall()}
+            if "embedding" not in memory_columns:
+                self.db.execute("ALTER TABLE memories ADD COLUMN embedding TEXT")
+                self.db.commit()
 
     def close(self) -> None:
         with self.lock:
@@ -100,26 +104,43 @@ class Store:
                 rows = self.db.execute("SELECT * FROM memories WHERE content LIKE ? ORDER BY importance DESC, updated_at DESC LIMIT ?", (f"%{query}%", limit)).fetchall()
             else:
                 rows = self.db.execute("SELECT * FROM memories ORDER BY importance DESC, updated_at DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(row) for row in rows]
+        return [self._memory(dict(row)) for row in rows]
 
-    def add_memory(self, content: str, kind: str = "fact", importance: int = 3, source: str = "manual") -> dict[str, Any]:
-        item = {"id": uuid.uuid4().hex, "content": content.strip(), "kind": kind, "importance": max(1, min(5, importance)), "source": source, "created_at": now(), "updated_at": now()}
+    def add_memory(self, content: str, kind: str = "fact", importance: int = 3, source: str = "manual", embedding: list[float] | None = None) -> dict[str, Any]:
+        item = {"id": uuid.uuid4().hex, "content": content.strip(), "kind": kind, "importance": max(1, min(5, importance)), "source": source, "created_at": now(), "updated_at": now(), "embedding": json.dumps(embedding) if embedding else None}
         with self.lock:
-            self.db.execute("INSERT INTO memories VALUES (:id,:content,:kind,:importance,:source,:created_at,:updated_at)", item)
+            self.db.execute("INSERT INTO memories (id,content,kind,importance,source,created_at,updated_at,embedding) VALUES (:id,:content,:kind,:importance,:source,:created_at,:updated_at,:embedding)", item)
             self.db.commit()
-        return item
+        return self._memory(item)
 
     def update_memory(self, memory_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         current = next((m for m in self.memories(limit=1000) if m["id"] == memory_id), None)
         if not current:
             return None
+        previous_content = current["content"]
         current.update({k: v for k, v in data.items() if k in {"content", "kind", "importance"} and v is not None})
         current["importance"] = max(1, min(5, int(current["importance"])))
         current["updated_at"] = now()
         with self.lock:
-            self.db.execute("UPDATE memories SET content=?,kind=?,importance=?,updated_at=? WHERE id=?", (current["content"], current["kind"], current["importance"], current["updated_at"], memory_id))
+            content_changed = current["content"] != previous_content
+            self.db.execute("UPDATE memories SET content=?,kind=?,importance=?,updated_at=?,embedding=CASE WHEN ? THEN NULL ELSE embedding END WHERE id=?", (current["content"], current["kind"], current["importance"], current["updated_at"], content_changed, memory_id))
             self.db.commit()
+        if content_changed: current["embedding"] = None
         return current
+
+    def set_memory_embedding(self, memory_id: str, embedding: list[float]) -> None:
+        with self.lock:
+            self.db.execute("UPDATE memories SET embedding=? WHERE id=?", (json.dumps(embedding), memory_id))
+            self.db.commit()
+
+    @staticmethod
+    def _memory(item: dict[str, Any]) -> dict[str, Any]:
+        result = dict(item)
+        raw = result.get("embedding")
+        if isinstance(raw, str):
+            try: result["embedding"] = json.loads(raw)
+            except json.JSONDecodeError: result["embedding"] = None
+        return result
 
     def delete_memory(self, memory_id: str) -> bool:
         with self.lock:

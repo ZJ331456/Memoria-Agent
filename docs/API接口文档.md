@@ -2,7 +2,7 @@
 
 ## 1. 文档范围
 
-本文描述 Memoria Agent `0.2.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
+本文描述 Memoria Agent `0.3.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
 
 - 默认地址：`http://127.0.0.1:2237`
 - API 前缀：`/api`
@@ -29,7 +29,7 @@
 | 状态码 | code | 含义 |
 |---|---|---|
 | 404 | `not_found` | 会话、记忆或工具不存在 |
-| 409 | `conflict` | 会话正在运行，或写工具没有明确确认 |
+| 409 | `conflict` | 会话正在运行、相似记忆已存在，或写工具没有明确确认 |
 | 422 | `validation_error` | 字段类型、长度、枚举或额外字段不合法 |
 | 502 | `upstream_error` | 模型供应商调用失败 |
 
@@ -42,7 +42,7 @@
 最小存活检查，不访问模型。
 
 ```json
-{"status":"ok","version":"0.2.0"}
+{"status":"ok","version":"0.3.0"}
 ```
 
 ### `GET /api/overview`
@@ -91,7 +91,7 @@
 {"content":"请记住我偏好简洁回答，然后计算 27 * 3"}
 ```
 
-执行顺序：保存用户消息、召回记忆、拼装上下文、模型推理、工具循环、保存助手消息、提取新记忆、记录 trace。
+执行顺序：保存用户消息、关键词与向量混合召回、拼装上下文、模型推理、工具循环、保存助手消息、提取并语义去重新记忆、记录 trace。
 
 响应：
 
@@ -125,7 +125,7 @@
 
 ### `GET /api/memories?q=&limit=100`
 
-搜索记忆正文。`q` 最长 200 字，`limit` 范围 1–500。
+`q` 为空时按重要度和更新时间列出记忆；`q` 非空时执行关键词与向量双路召回和 RRF 融合。`q` 最长 200 字，`limit` 范围 1–500。embedding 服务失败时自动回退关键词召回。
 
 ### `POST /api/memories`
 
@@ -134,6 +134,18 @@
 ```
 
 `kind` 可选：`fact`、`preference`、`profile`、`goal`、`procedure`；重要度为 1–5。
+
+写入前同时执行文本和向量相似去重；相似记忆已存在时返回 409。
+
+### `POST /api/memories/reindex?limit=1000`
+
+为没有向量的历史记忆批量回填 embedding，`limit` 范围 1–5000。响应示例：
+
+```json
+{"enabled":true,"indexed":36,"remaining":0}
+```
+
+embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余数量。
 
 ### `PATCH /api/memories/{memory_id}`
 
@@ -190,7 +202,7 @@ curl -s "$BASE/api/traces?session_id=$SESSION"
 | 前端功能 | 使用 API |
 |---|---|
 | 对话实验室 | sessions、messages、chat |
-| 长期记忆 | memories GET/POST/DELETE |
+| 长期记忆 | memories GET/POST/PATCH/DELETE/reindex |
 | 运行追踪 | overview、traces |
 | 工具实验台 | tools、tools execute |
 

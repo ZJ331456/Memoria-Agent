@@ -39,8 +39,10 @@ def test_openapi_and_tool_debug(tmp_path: Path):
     config.write_text(f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n[storage]\ndatabase="{tmp_path / 'api.db'}"\n''', encoding="utf-8")
     client = TestClient(create_app(config))
     schema = client.get("/openapi.json").json()
-    assert schema["info"]["version"] == "0.2.0"
+    assert schema["info"]["version"] == "0.3.0"
     assert "/api/tools/{tool_name}/execute" in schema["paths"]
+    assert "/api/memories/reindex" in schema["paths"]
+    assert client.post("/api/memories/reindex").json() == {"enabled": False, "indexed": 0, "remaining": 0}
     result = client.post("/api/tools/calculate/execute", json={"arguments": {"expression": "6*7"}})
     assert result.status_code == 200 and result.json()["content"] == "42"
     blocked = client.post("/api/tools/memorize/execute", json={"arguments": {"content": "test"}})
@@ -50,9 +52,47 @@ def test_openapi_and_tool_debug(tmp_path: Path):
 def test_memory_dedup_and_rank(tmp_path: Path):
     store = Store(tmp_path / "memory.db")
     engine = MemoryEngine(store)
-    assert engine.add_if_new("用户喜欢简洁回答", "preference", 4, "test")
-    assert engine.add_if_new("用户喜欢简洁回答", "preference", 4, "test") is None
-    assert engine.retrieve("简洁回答")[0]["kind"] == "preference"
+    assert asyncio.run(engine.add_if_new("用户喜欢简洁回答", "preference", 4, "test"))
+    assert asyncio.run(engine.add_if_new("用户喜欢简洁回答", "preference", 4, "test")) is None
+    assert asyncio.run(engine.retrieve("简洁回答"))[0]["kind"] == "preference"
+
+
+class FakeEmbedder:
+    enabled = True
+    timeout_seconds = 1
+
+    @staticmethod
+    def vector(text: str) -> list[float]:
+        if any(word in text for word in ("爬山", "户外运动", "徒步")):
+            return [1.0, 0.0]
+        return [0.0, 1.0]
+
+    async def embed(self, text: str) -> list[float]:
+        return self.vector(text)
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.vector(text) for text in texts]
+
+
+def test_semantic_retrieval_and_lazy_embedding_backfill(tmp_path: Path):
+    store = Store(tmp_path / "semantic.db")
+    hiking = store.add_memory("用户周末常去爬山", "preference", 4, "test")
+    store.add_memory("用户偏好喝红茶", "preference", 3, "test")
+    engine = MemoryEngine(store, FakeEmbedder())
+
+    result = asyncio.run(engine.retrieve("休息日偏爱的户外运动", 1))
+
+    assert result[0]["id"] == hiking["id"]
+    assert result[0]["retrieval"]["vector_rank"] == 1
+    assert store.memories(limit=10)[0].get("embedding") is not None
+    assert store.update_memory(hiking["id"], {"content": "用户偶尔去爬山"})["embedding"] is None
+
+
+def test_reindex_reports_disabled_embedding(tmp_path: Path):
+    store = Store(tmp_path / "disabled.db")
+    store.add_memory("一条旧记忆")
+    result = asyncio.run(MemoryEngine(store).reindex())
+    assert result == {"enabled": False, "indexed": 0, "remaining": 1}
 
 
 def test_builtin_tools_and_trace(tmp_path: Path):

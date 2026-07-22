@@ -5,6 +5,7 @@ import operator
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from ..memory import MemoryEngine
 from ..store import Store
 from .registry import Tool, ToolRegistry
 
@@ -13,15 +14,22 @@ def _schema(properties: dict, required: list[str]) -> dict:
     return {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
 
 
-def build_registry(store: Store) -> ToolRegistry:
+def build_registry(store: Store, memory: MemoryEngine | None = None) -> ToolRegistry:
     registry = ToolRegistry()
-    async def recall(a): return store.memories(str(a["query"]), int(a.get("limit", 5)))
-    async def memorize(a): return store.add_memory(a["content"], a.get("kind", "fact"), int(a.get("importance", 3)), "agent_tool")
+    async def recall(a):
+        if memory:
+            return await memory.retrieve(str(a["query"]), int(a.get("limit", 5)))
+        return store.memories(str(a["query"]), int(a.get("limit", 5)))
+    async def memorize(a):
+        if memory:
+            saved = await memory.add_if_new(a["content"], a.get("kind", "fact"), int(a.get("importance", 3)), "agent_tool")
+            return saved or {"saved": False, "reason": "已存在相似记忆"}
+        return store.add_memory(a["content"], a.get("kind", "fact"), int(a.get("importance", 3)), "agent_tool")
     async def forget(a): return {"deleted": store.delete_memory(a["memory_id"])}
     async def history(a): return store.search_messages(a["query"], int(a.get("limit", 6)))
     async def clock(a): return datetime.now(ZoneInfo(a.get("timezone", "Asia/Shanghai"))).isoformat()
     async def calculate(a): return _safe_calculate(a["expression"])
-    registry.register(Tool("recall_memory", "按关键词检索长期记忆。", _schema({"query":{"type":"string"},"limit":{"type":"integer"}}, ["query"]), recall))
+    registry.register(Tool("recall_memory", "使用关键词和语义向量检索长期记忆。", _schema({"query":{"type":"string"},"limit":{"type":"integer"}}, ["query"]), recall))
     registry.register(Tool("memorize", "明确保存一条值得长期保留的用户事实、偏好或目标。", _schema({"content":{"type":"string"},"kind":{"type":"string"},"importance":{"type":"integer"}}, ["content"]), memorize, "write"))
     registry.register(Tool("forget_memory", "按记忆 ID 删除错误或用户要求遗忘的记忆。", _schema({"memory_id":{"type":"string"}}, ["memory_id"]), forget, "write"))
     registry.register(Tool("search_history", "搜索过去会话消息。", _schema({"query":{"type":"string"},"limit":{"type":"integer"}}, ["query"]), history))
@@ -43,4 +51,3 @@ def _safe_calculate(expression: str) -> int | float:
         raise ValueError("只允许基础算术")
     if len(expression)>120: raise ValueError("表达式过长")
     return visit(ast.parse(expression, mode="eval"))
-

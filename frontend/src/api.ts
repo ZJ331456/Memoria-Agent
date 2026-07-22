@@ -2,6 +2,7 @@ export type Session={id:string;title:string;created_at:string;updated_at:string;
 export type Message={id:string;session_id:string;role:'user'|'assistant';content:string;created_at:string}
 export type MemoryKind='fact'|'preference'|'profile'|'goal'|'procedure'
 export type Memory={id:string;content:string;kind:MemoryKind;importance:number;source:string;created_at:string;updated_at:string}
+export type MemoryReindex={enabled:boolean;indexed:number;remaining:number}
 export type Tool={name:string;description:string;risk:'read-only'|'write'|string}
 export type Trace={id:string;session_id:string;status:string;steps:number;duration_ms:number;memories:Memory[];tools:Array<{name:string;ok:boolean;elapsed_ms:number;preview:string;arguments:Record<string,unknown>}>;error:string|null;created_at:string}
 export type Overview={sessions:number;messages:number;memories:number;traces:number;models:Record<string,any>;tools:Tool[];pipeline:Record<string,string[]>}
@@ -14,6 +15,7 @@ export const api={
  deleteSession:(id:string)=>call<void>(`/api/sessions/${id}`,{method:'DELETE'}), messages:(id:string)=>call<Message[]>(`/api/sessions/${id}/messages`),
  chat:(id:string,content:string)=>call<{message:Message;memories_created:Memory[];trace:Trace}>(`/api/sessions/${id}/chat`,{method:'POST',body:JSON.stringify({content})}),
  memories:(q='')=>call<Memory[]>(`/api/memories?q=${encodeURIComponent(q)}`), createMemory:(data:{content:string;kind:MemoryKind;importance:number})=>call<Memory>('/api/memories',{method:'POST',body:JSON.stringify(data)}),
+ reindexMemories:(limit=1000)=>call<MemoryReindex>(`/api/memories/reindex?limit=${limit}`,{method:'POST'}),
  updateMemory:(id:string,data:Partial<Pick<Memory,'content'|'kind'|'importance'>>)=>call<Memory>(`/api/memories/${id}`,{method:'PATCH',body:JSON.stringify(data)}), deleteMemory:(id:string)=>call<void>(`/api/memories/${id}`,{method:'DELETE'}),
  traces:(sessionId='')=>call<Trace[]>(`/api/traces?session_id=${encodeURIComponent(sessionId)}`), tools:()=>call<Tool[]>('/api/tools'),
  executeTool:(name:string,arguments_:Record<string,unknown>,confirmWrite=false)=>call<{name:string;ok:boolean;content:string;elapsed_ms:number}>(`/api/tools/${name}/execute`,{method:'POST',body:JSON.stringify({arguments:arguments_,confirm_write:confirmWrite})})

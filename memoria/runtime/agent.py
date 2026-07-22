@@ -28,7 +28,7 @@ class AgentRuntime:
             user_message = self.store.add_message(session_id, "user", user_text)
             session = self.store.session(session_id)
             if session and session["title"] == "新对话": self.store.rename_session(session_id, user_text.replace("\n", " ")[:28])
-            context.memories = self.memory.retrieve(user_text)
+            context.memories = await self.memory.retrieve(user_text)
             history = self.store.messages(session_id, self.settings.memory_window)
             memory_text = "\n".join(f"- [{m['id']}] {m['content']}" for m in context.memories) or "（暂无相关长期记忆）"
             context.messages = [{"role":"system","content":self.settings.system_prompt+"\n\n你可以使用工具查找历史、管理记忆、计算和获取时间。相关长期记忆：\n"+memory_text}]
@@ -73,7 +73,7 @@ class AgentRuntime:
             extracted = await self.llm.extract_memories(user_text, context.response)
             created = []
             for item in extracted:
-                saved = self.memory.add_if_new(str(item["content"]), str(item.get("kind","fact")), int(item.get("importance",3)), "conversation")
+                saved = await self.memory.add_if_new(str(item["content"]), str(item.get("kind","fact")), int(item.get("importance",3)), "conversation")
                 if saved: created.append(saved)
             await self.pipeline.run(Phase.AFTER_TURN, context)
             trace = tracer.finish("completed", max(1,len(context.tool_chain)+1), context.memories, context.tool_chain)
