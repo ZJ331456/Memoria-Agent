@@ -12,7 +12,7 @@ class AgentService:
     def __init__(self, settings: Settings, store: Store, llm: LLMClient):
         self.settings, self.store, self.llm = settings, store, llm
         embedder = EmbeddingClient(settings.embedding, min(settings.request_timeout_seconds, 30), settings.max_retries)
-        memory = MemoryEngine(store, embedder)
+        memory = MemoryEngine(store, embedder, llm.decide_memory_relation)
         self.runtime = AgentRuntime(settings, store, llm, memory, build_registry(store, memory))
 
     async def chat(self, session_id: str, content: str) -> tuple[dict, list[dict]]:

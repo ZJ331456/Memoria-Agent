@@ -4,19 +4,38 @@ import asyncio
 import logging
 import math
 import re
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
 
 from ..store import Store
 from .embedding import EmbeddingClient
 
 logger = logging.getLogger(__name__)
+MemoryDecider = Callable[[str, str, list[dict[str, Any]]], Awaitable[dict[str, str]]]
+
+
+@dataclass(slots=True)
+class MemoryWriteResult:
+    action: str
+    memory: dict[str, Any] | None
+    previous_id: str | None = None
+    reason: str = ""
+
+    def public_dict(self) -> dict[str, Any]:
+        memory = dict(self.memory) if self.memory else None
+        if memory:
+            memory.pop("embedding", None)
+        return {"action": self.action, "memory": memory, "previous_id": self.previous_id, "reason": self.reason}
 
 
 class MemoryEngine:
     """Keyword + vector retrieval with RRF fusion and graceful lexical fallback."""
 
-    def __init__(self, store: Store, embedder: EmbeddingClient | None = None):
+    def __init__(self, store: Store, embedder: EmbeddingClient | None = None, decider: MemoryDecider | None = None):
         self.store = store
         self.embedder = embedder
+        self.decider = decider
 
     async def retrieve(self, query: str, limit: int = 8) -> list[dict]:
         items = self.store.memories(limit=500)
@@ -48,7 +67,14 @@ class MemoryEngine:
             for rank, item in enumerate(lane, start=1):
                 fused[item["id"]] = fused.get(item["id"], 0.0) + weight / (60 + rank)
         by_id = {item["id"]: item for item in items}
-        ranked_ids = sorted(fused, key=lambda memory_id: (fused[memory_id], int(by_id[memory_id]["importance"])), reverse=True)[:max(1, limit)]
+        ranked_ids = sorted(
+            fused,
+            key=lambda memory_id: (
+                fused[memory_id] + min(math.log1p(int(by_id[memory_id].get("reinforcement", 1))), 2.5) * 0.0005,
+                int(by_id[memory_id]["importance"]),
+            ),
+            reverse=True,
+        )[:max(1, limit)]
         result = []
         for memory_id in ranked_ids:
             item = dict(by_id[memory_id])
@@ -63,29 +89,64 @@ class MemoryEngine:
         return result
 
     async def add_if_new(self, content: str, kind: str, importance: int, source: str) -> dict | None:
+        result = await self.remember(content, kind, importance, source)
+        return result.memory if result.action in {"created", "superseded"} else None
+
+    async def remember(self, content: str, kind: str, importance: int, source: str) -> MemoryWriteResult:
         content = content.strip()
         if not content:
-            return None
+            return MemoryWriteResult("skipped", None, reason="empty content")
         items = self.store.memories(limit=1000)
-        normalized = self._normalize(content)
+        canonical = self._canonical(content)
         for item in items:
-            if self._similar(normalized, self._normalize(item["content"])) >= 0.86:
-                return None
+            if item["kind"] == kind and canonical == self._canonical(item["content"]):
+                reinforced = self.store.reinforce_memory(item["id"])
+                return MemoryWriteResult("reinforced", reinforced, item["id"], "exact match")
 
         vector: list[float] | None = None
         if self.embedder and self.embedder.enabled:
             try:
                 await self._backfill(items, limit=128)
                 vector = await asyncio.wait_for(self.embedder.embed(content), timeout=self.embedder.timeout_seconds + 1)
-                if vector:
-                    for item in items:
-                        existing = item.get("embedding")
-                        if existing and len(existing) == len(vector) and self._cosine(vector, existing) >= 0.94:
-                            return None
             except Exception as exc:
                 logger.warning("记忆向量去重不可用，使用文本去重: %s", type(exc).__name__)
                 vector = None
-        return self.store.add_memory(content, kind, importance, source, vector)
+
+        normalized = self._normalize(content)
+        related: list[dict[str, Any]] = []
+        for item in items:
+            if item["kind"] != kind:
+                continue
+            lexical_similarity = self._similar(normalized, self._normalize(item["content"]))
+            semantic_similarity = 0.0
+            existing = item.get("embedding")
+            if vector and existing and len(existing) == len(vector):
+                semantic_similarity = self._cosine(vector, existing)
+            relation_similarity = max(lexical_similarity, semantic_similarity)
+            if relation_similarity >= 0.55:
+                candidate = dict(item)
+                candidate.pop("embedding", None)
+                candidate["relation_similarity"] = round(relation_similarity, 4)
+                related.append(candidate)
+        related.sort(key=lambda item: float(item["relation_similarity"]), reverse=True)
+        related = related[:3]
+
+        if related and self.decider:
+            decision = await self.decider(content, kind, related)
+            target_id = decision.get("target_id", "")
+            target = next((item for item in related if item["id"] == target_id), None)
+            action = decision.get("action", "create")
+            if target and action == "reinforce" and float(target["relation_similarity"]) >= 0.78:
+                reinforced = self.store.reinforce_memory(target_id)
+                return MemoryWriteResult("reinforced", reinforced, target_id, decision.get("reason", ""))
+            mutable_kinds = {"preference", "profile", "goal", "procedure"}
+            if target and action == "supersede" and kind in mutable_kinds and float(target["relation_similarity"]) >= 0.55:
+                reason = decision.get("reason", "")
+                saved = self.store.add_memory(content, kind, importance, source, vector, target_id, reason)
+                return MemoryWriteResult("superseded", saved, target_id, reason)
+
+        saved = self.store.add_memory(content, kind, importance, source, vector)
+        return MemoryWriteResult("created", saved, reason="independent memory")
 
     async def reindex(self, limit: int = 1000) -> dict[str, int | bool]:
         items = self.store.memories(limit=max(1, min(limit, 5000)))
@@ -136,6 +197,10 @@ class MemoryEngine:
     @staticmethod
     def _normalize(text: str) -> set[str]:
         return set(re.findall(r"[\w\u4e00-\u9fff]", text.lower()))
+
+    @staticmethod
+    def _canonical(text: str) -> str:
+        return re.sub(r"[^\w\u4e00-\u9fff]+", "", text.lower())
 
     @staticmethod
     def _similar(a: set[str], b: set[str]) -> float:

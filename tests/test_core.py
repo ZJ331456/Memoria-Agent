@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 
 from fastapi.testclient import TestClient
 
@@ -23,8 +24,14 @@ def test_session_and_memory_crud(tmp_path: Path):
     client = TestClient(create_app(config))
     session = client.post("/api/sessions", json={"title": "测试"}).json()
     assert client.get("/api/sessions").json()[0]["id"] == session["id"]
-    memory = client.post("/api/memories", json={"content": "喜欢简洁回答", "kind": "preference", "importance": 4}).json()
+    created = client.post("/api/memories", json={"content": "喜欢简洁回答", "kind": "preference", "importance": 4}).json()
+    assert created["action"] == "created"
+    memory = created["memory"]
     assert client.get("/api/memories?q=简洁").json()[0]["id"] == memory["id"]
+    reinforced = client.post("/api/memories", json={"content": "喜欢简洁回答", "kind": "preference", "importance": 4})
+    assert reinforced.status_code == 200 and reinforced.json()["action"] == "reinforced"
+    assert client.get("/api/memories").json()[0]["reinforcement"] == 2
+    assert client.get(f"/api/memories/{memory['id']}/history").json() == []
     assert client.patch(f"/api/memories/{memory['id']}", json={"importance": 5}).json()["importance"] == 5
     assert client.delete(f"/api/memories/{memory['id']}").status_code == 204
     assert client.patch(f"/api/sessions/{session['id']}", json={"title": "已重命名"}).json()["title"] == "已重命名"
@@ -39,9 +46,10 @@ def test_openapi_and_tool_debug(tmp_path: Path):
     config.write_text(f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n[storage]\ndatabase="{tmp_path / 'api.db'}"\n''', encoding="utf-8")
     client = TestClient(create_app(config))
     schema = client.get("/openapi.json").json()
-    assert schema["info"]["version"] == "0.3.0"
+    assert schema["info"]["version"] == "0.4.0"
     assert "/api/tools/{tool_name}/execute" in schema["paths"]
     assert "/api/memories/reindex" in schema["paths"]
+    assert "/api/memories/{memory_id}/history" in schema["paths"]
     assert client.post("/api/memories/reindex").json() == {"enabled": False, "indexed": 0, "remaining": 0}
     result = client.post("/api/tools/calculate/execute", json={"arguments": {"expression": "6*7"}})
     assert result.status_code == 200 and result.json()["content"] == "42"
@@ -54,6 +62,7 @@ def test_memory_dedup_and_rank(tmp_path: Path):
     engine = MemoryEngine(store)
     assert asyncio.run(engine.add_if_new("用户喜欢简洁回答", "preference", 4, "test"))
     assert asyncio.run(engine.add_if_new("用户喜欢简洁回答", "preference", 4, "test")) is None
+    assert store.memories()[0]["reinforcement"] == 2
     assert asyncio.run(engine.retrieve("简洁回答"))[0]["kind"] == "preference"
 
 
@@ -93,6 +102,42 @@ def test_reindex_reports_disabled_embedding(tmp_path: Path):
     store.add_memory("一条旧记忆")
     result = asyncio.run(MemoryEngine(store).reindex())
     assert result == {"enabled": False, "indexed": 0, "remaining": 1}
+
+
+def test_memory_supersede_keeps_history_and_hides_old_item(tmp_path: Path):
+    async def supersede_new_preference(content, kind, candidates):
+        return {"action": "supersede", "target_id": candidates[0]["id"], "reason": "用户明确改变偏好"}
+
+    store = Store(tmp_path / "supersede.db")
+    engine = MemoryEngine(store, FakeEmbedder(), supersede_new_preference)
+    old = asyncio.run(engine.add_if_new("用户喜欢喝咖啡", "preference", 3, "test"))
+    new = asyncio.run(engine.add_if_new("用户现在改为喜欢喝红茶", "preference", 4, "test"))
+
+    assert old and new and new["supersedes_id"] == old["id"]
+    assert store.memory(old["id"])["status"] == "superseded"
+    assert [item["id"] for item in store.memories()] == [new["id"]]
+    assert store.memories(status="superseded")[0]["id"] == old["id"]
+    history = store.memory_history(new["id"])
+    assert history[0]["old_memory_id"] == old["id"]
+    assert history[0]["reason"] == "用户明确改变偏好"
+
+
+def test_store_migrates_legacy_memory_schema(tmp_path: Path):
+    path = tmp_path / "legacy.db"
+    db = sqlite3.connect(path)
+    db.execute("""CREATE TABLE memories (
+        id TEXT PRIMARY KEY, content TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'fact',
+        importance INTEGER NOT NULL DEFAULT 3, source TEXT NOT NULL DEFAULT 'manual',
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )""")
+    db.execute("INSERT INTO memories VALUES ('legacy','旧记忆','fact',3,'test','2026-01-01','2026-01-01')")
+    db.commit()
+    db.close()
+
+    store = Store(path)
+    item = store.memory("legacy")
+    assert item and item["status"] == "active" and item["reinforcement"] == 1
+    assert item["embedding"] is None and item["supersedes_id"] is None
 
 
 def test_builtin_tools_and_trace(tmp_path: Path):

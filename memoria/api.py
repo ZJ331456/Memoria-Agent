@@ -86,12 +86,34 @@ class MemoryResponse(BaseModel):
     source: str
     created_at: str
     updated_at: str
+    status: Literal["active", "superseded"] = "active"
+    reinforcement: int = 1
+    supersedes_id: str | None = None
+    last_reinforced_at: str | None = None
 
 
 class MemoryReindexResponse(BaseModel):
     enabled: bool
     indexed: int
     remaining: int
+
+
+class MemoryWriteResponse(BaseModel):
+    action: Literal["created", "reinforced", "superseded"]
+    memory: MemoryResponse
+    previous_id: str | None = None
+    reason: str = ""
+
+
+class MemoryReplacementResponse(BaseModel):
+    id: int
+    old_memory_id: str
+    new_memory_id: str
+    old_content: str
+    new_content: str
+    relation: str
+    reason: str
+    created_at: str
 
 
 class TraceResponse(BaseModel):
@@ -124,7 +146,7 @@ class ToolExecuteResponse(BaseModel):
     elapsed_ms: int
 
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
     {"name": "sessions", "description": "会话生命周期和消息历史。"},
@@ -244,18 +266,25 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return Response(status_code=204)
 
     @app.get("/api/memories", response_model=list[MemoryResponse], tags=["memories"], summary="搜索长期记忆")
-    async def memories(q: str = Query(default="", max_length=200), limit: int = Query(default=100, ge=1, le=500)):
-        return await service.runtime.memory.retrieve(q, limit) if q.strip() else store.memories(limit=limit)
+    async def memories(q: str = Query(default="", max_length=200), limit: int = Query(default=100, ge=1, le=500), status: Literal["active", "superseded", "all"] = "active"):
+        if q.strip() and status == "active":
+            return await service.runtime.memory.retrieve(q, limit)
+        return store.memories(q, limit, status)
 
-    @app.post("/api/memories", response_model=MemoryResponse, status_code=201, tags=["memories"], summary="创建长期记忆")
+    @app.post("/api/memories", response_model=MemoryWriteResponse, tags=["memories"], summary="创建、强化或替代长期记忆")
     async def create_memory(body: MemoryBody):
-        item = await service.runtime.memory.add_if_new(body.content, body.kind, body.importance, "manual")
-        if not item: raise HTTPException(409, "已存在相似记忆")
-        return item
+        if not body.content.strip(): raise HTTPException(422, "记忆内容不能为空")
+        result = await service.runtime.memory.remember(body.content, body.kind, body.importance, "manual")
+        return result.public_dict()
 
     @app.post("/api/memories/reindex", response_model=MemoryReindexResponse, tags=["memories"], summary="回填长期记忆语义向量")
     async def reindex_memories(limit: int = Query(default=1000, ge=1, le=5000)):
         return await service.runtime.memory.reindex(limit)
+
+    @app.get("/api/memories/{memory_id}/history", response_model=list[MemoryReplacementResponse], tags=["memories"], summary="查询记忆替代历史")
+    def memory_history(memory_id: str):
+        if not store.memory(memory_id): raise HTTPException(404, "记忆不存在")
+        return store.memory_history(memory_id)
 
     @app.patch("/api/memories/{memory_id}", response_model=MemoryResponse, tags=["memories"], summary="编辑长期记忆")
     def update_memory(memory_id: str, body: MemoryPatch):

@@ -33,7 +33,7 @@ FastAPI route
 
 - Session：`SessionBody`、`SessionPatch`、`SessionResponse`
 - Chat：`ChatBody`、`ChatResponse`、`MessageResponse`
-- Memory：`MemoryBody`、`MemoryPatch`、`MemoryResponse`、`MemoryReindexResponse`
+- Memory：`MemoryBody`、`MemoryPatch`、`MemoryResponse`、`MemoryWriteResponse`、`MemoryReindexResponse`、`MemoryReplacementResponse`
 - Tool：`ToolExecuteBody`、`ToolExecuteResponse`
 - Trace/System：`TraceResponse`、`HealthResponse`、`ErrorResponse`
 
@@ -46,7 +46,7 @@ FastAPI route
 | `system` | `/api/health`、`/api/overview` | 存活状态和脱敏运行时信息 |
 | `sessions` | `/api/sessions...` | 会话和消息 CRUD |
 | `agent` | `/api/sessions/{id}/chat` | 完整 Agent turn |
-| `memories` | `/api/memories...` | 语义检索、写入、编辑、删除和向量回填 |
+| `memories` | `/api/memories...` | 语义检索、强化/替代写入、编辑、删除、历史和向量回填 |
 | `tools` | `/api/tools...` | 工具目录和受确认保护的调试执行 |
 | `traces` | `/api/traces` | 推理运行追踪 |
 

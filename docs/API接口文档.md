@@ -2,7 +2,7 @@
 
 ## 1. 文档范围
 
-本文描述 Memoria Agent `0.3.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
+本文描述 Memoria Agent `0.4.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
 
 - 默认地址：`http://127.0.0.1:2237`
 - API 前缀：`/api`
@@ -29,7 +29,7 @@
 | 状态码 | code | 含义 |
 |---|---|---|
 | 404 | `not_found` | 会话、记忆或工具不存在 |
-| 409 | `conflict` | 会话正在运行、相似记忆已存在，或写工具没有明确确认 |
+| 409 | `conflict` | 会话正在运行，或写工具没有明确确认 |
 | 422 | `validation_error` | 字段类型、长度、枚举或额外字段不合法 |
 | 502 | `upstream_error` | 模型供应商调用失败 |
 
@@ -42,7 +42,7 @@
 最小存活检查，不访问模型。
 
 ```json
-{"status":"ok","version":"0.3.0"}
+{"status":"ok","version":"0.4.0"}
 ```
 
 ### `GET /api/overview`
@@ -123,9 +123,9 @@
 
 ## 6. Memory API
 
-### `GET /api/memories?q=&limit=100`
+### `GET /api/memories?q=&limit=100&status=active`
 
-`q` 为空时按重要度和更新时间列出记忆；`q` 非空时执行关键词与向量双路召回和 RRF 融合。`q` 最长 200 字，`limit` 范围 1–500。embedding 服务失败时自动回退关键词召回。
+`status` 可为 `active`、`superseded` 或 `all`，默认只列出有效记忆。有效记忆在 `q` 非空时执行关键词与向量双路召回和 RRF 融合；已替代记忆只用于查询审计，不参与语义召回。`q` 最长 200 字，`limit` 范围 1–500。
 
 ### `POST /api/memories`
 
@@ -135,7 +135,13 @@
 
 `kind` 可选：`fact`、`preference`、`profile`、`goal`、`procedure`；重要度为 1–5。
 
-写入前同时执行文本和向量相似去重；相似记忆已存在时返回 409。
+写入前先对同类型记忆做文本/向量候选预筛，再由 fast 模型在 `create`、`reinforce`、`supersede` 中选择：
+
+- `create`：写入独立有效记忆。
+- `reinforce`：已有记忆强化次数加一，不产生重复行。
+- `supersede`：写入新记忆，旧记忆变为 `superseded` 并退出对话召回。
+
+响应结构为 `{"action":"created|reinforced|superseded","memory":{...},"previous_id":null,"reason":"..."}`。其中 `memory` 新增 `status`、`reinforcement`、`supersedes_id` 和 `last_reinforced_at`，不会返回 embedding 原文。
 
 ### `POST /api/memories/reindex?limit=1000`
 
@@ -146,6 +152,10 @@
 ```
 
 embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余数量。
+
+### `GET /api/memories/{memory_id}/history`
+
+查询一条记忆作为旧版本或新版本参与的替代记录，包括新旧 ID、正文快照、关系、判定原因和时间。记忆不存在时返回 404。
 
 ### `PATCH /api/memories/{memory_id}`
 

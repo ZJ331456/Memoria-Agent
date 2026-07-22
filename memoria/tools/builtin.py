@@ -22,8 +22,8 @@ def build_registry(store: Store, memory: MemoryEngine | None = None) -> ToolRegi
         return store.memories(str(a["query"]), int(a.get("limit", 5)))
     async def memorize(a):
         if memory:
-            saved = await memory.add_if_new(a["content"], a.get("kind", "fact"), int(a.get("importance", 3)), "agent_tool")
-            return saved or {"saved": False, "reason": "已存在相似记忆"}
+            result = await memory.remember(a["content"], a.get("kind", "fact"), int(a.get("importance", 3)), "agent_tool")
+            return result.public_dict()
         return store.add_memory(a["content"], a.get("kind", "fact"), int(a.get("importance", 3)), "agent_tool")
     async def forget(a): return {"deleted": store.delete_memory(a["memory_id"])}
     async def history(a): return store.search_messages(a["query"], int(a.get("limit", 6)))

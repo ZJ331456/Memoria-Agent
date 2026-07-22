@@ -35,9 +35,19 @@ class Store:
                 CREATE TABLE IF NOT EXISTS memories (
                     id TEXT PRIMARY KEY, content TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'fact',
                     importance INTEGER NOT NULL DEFAULT 3, source TEXT NOT NULL DEFAULT 'manual',
-                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, embedding TEXT
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, embedding TEXT,
+                    status TEXT NOT NULL DEFAULT 'active', reinforcement INTEGER NOT NULL DEFAULT 1,
+                    supersedes_id TEXT, last_reinforced_at TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_memories_updated ON memories(updated_at DESC);
+                CREATE TABLE IF NOT EXISTS memory_replacements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, old_memory_id TEXT NOT NULL,
+                    new_memory_id TEXT NOT NULL, old_content TEXT NOT NULL,
+                    new_content TEXT NOT NULL, relation TEXT NOT NULL DEFAULT 'supersede',
+                    reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_replacements_old ON memory_replacements(old_memory_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_replacements_new ON memory_replacements(new_memory_id, created_at DESC);
                 CREATE TABLE IF NOT EXISTS turn_traces (
                     id TEXT PRIMARY KEY, session_id TEXT NOT NULL, status TEXT NOT NULL,
                     steps INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
@@ -48,9 +58,18 @@ class Store:
             """)
             self.db.commit()
             memory_columns = {row[1] for row in self.db.execute("PRAGMA table_info(memories)").fetchall()}
-            if "embedding" not in memory_columns:
-                self.db.execute("ALTER TABLE memories ADD COLUMN embedding TEXT")
-                self.db.commit()
+            migrations = {
+                "embedding": "ALTER TABLE memories ADD COLUMN embedding TEXT",
+                "status": "ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+                "reinforcement": "ALTER TABLE memories ADD COLUMN reinforcement INTEGER NOT NULL DEFAULT 1",
+                "supersedes_id": "ALTER TABLE memories ADD COLUMN supersedes_id TEXT",
+                "last_reinforced_at": "ALTER TABLE memories ADD COLUMN last_reinforced_at TEXT",
+            }
+            for column, statement in migrations.items():
+                if column not in memory_columns:
+                    self.db.execute(statement)
+            self.db.execute("CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status, updated_at DESC)")
+            self.db.commit()
 
     def close(self) -> None:
         with self.lock:
@@ -98,23 +117,76 @@ class Store:
             self.db.commit()
         return cur.rowcount > 0
 
-    def memories(self, query: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    def memories(self, query: str = "", limit: int = 100, status: str = "active") -> list[dict[str, Any]]:
+        status = status if status in {"active", "superseded", "all"} else "active"
+        clauses, params = [], []
+        if status != "all":
+            clauses.append("status=?")
+            params.append(status)
+        if query:
+            clauses.append("content LIKE ?")
+            params.append(f"%{query}%")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         with self.lock:
-            if query:
-                rows = self.db.execute("SELECT * FROM memories WHERE content LIKE ? ORDER BY importance DESC, updated_at DESC LIMIT ?", (f"%{query}%", limit)).fetchall()
-            else:
-                rows = self.db.execute("SELECT * FROM memories ORDER BY importance DESC, updated_at DESC LIMIT ?", (limit,)).fetchall()
+            rows = self.db.execute(
+                f"SELECT * FROM memories{where} ORDER BY importance DESC, reinforcement DESC, updated_at DESC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
         return [self._memory(dict(row)) for row in rows]
 
-    def add_memory(self, content: str, kind: str = "fact", importance: int = 3, source: str = "manual", embedding: list[float] | None = None) -> dict[str, Any]:
-        item = {"id": uuid.uuid4().hex, "content": content.strip(), "kind": kind, "importance": max(1, min(5, importance)), "source": source, "created_at": now(), "updated_at": now(), "embedding": json.dumps(embedding) if embedding else None}
+    def memory(self, memory_id: str) -> dict[str, Any] | None:
         with self.lock:
-            self.db.execute("INSERT INTO memories (id,content,kind,importance,source,created_at,updated_at,embedding) VALUES (:id,:content,:kind,:importance,:source,:created_at,:updated_at,:embedding)", item)
-            self.db.commit()
+            row = self.db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+        return self._memory(dict(row)) if row else None
+
+    def add_memory(self, content: str, kind: str = "fact", importance: int = 3, source: str = "manual", embedding: list[float] | None = None, supersedes_id: str | None = None, reason: str = "") -> dict[str, Any]:
+        timestamp = now()
+        item = {
+            "id": uuid.uuid4().hex, "content": content.strip(), "kind": kind,
+            "importance": max(1, min(5, importance)), "source": source,
+            "created_at": timestamp, "updated_at": timestamp,
+            "embedding": json.dumps(embedding) if embedding else None,
+            "status": "active", "reinforcement": 1,
+            "supersedes_id": supersedes_id, "last_reinforced_at": None,
+        }
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                previous = None
+                if supersedes_id:
+                    previous = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active' AND kind=?", (supersedes_id, kind)).fetchone()
+                    if previous is None:
+                        item["supersedes_id"] = None
+                self.db.execute("""INSERT INTO memories
+                    (id,content,kind,importance,source,created_at,updated_at,embedding,status,reinforcement,supersedes_id,last_reinforced_at)
+                    VALUES (:id,:content,:kind,:importance,:source,:created_at,:updated_at,:embedding,:status,:reinforcement,:supersedes_id,:last_reinforced_at)""", item)
+                if previous is not None:
+                    self.db.execute("UPDATE memories SET status='superseded',updated_at=? WHERE id=?", (timestamp, supersedes_id))
+                    self.db.execute("""INSERT INTO memory_replacements
+                        (old_memory_id,new_memory_id,old_content,new_content,relation,reason,created_at)
+                        VALUES (?,?,?,?,?,?,?)""", (supersedes_id, item["id"], previous["content"], item["content"], "supersede", reason[:500], timestamp))
+                self.db.execute("COMMIT")
+            except Exception:
+                self.db.execute("ROLLBACK")
+                raise
         return self._memory(item)
 
+    def reinforce_memory(self, memory_id: str) -> dict[str, Any] | None:
+        timestamp = now()
+        with self.lock:
+            cur = self.db.execute("""UPDATE memories SET reinforcement=reinforcement+1,
+                last_reinforced_at=?,updated_at=? WHERE id=? AND status='active'""", (timestamp, timestamp, memory_id))
+            self.db.commit()
+        return self.memory(memory_id) if cur.rowcount else None
+
+    def memory_history(self, memory_id: str) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.db.execute("""SELECT * FROM memory_replacements
+                WHERE old_memory_id=? OR new_memory_id=? ORDER BY created_at DESC""", (memory_id, memory_id)).fetchall()
+        return [dict(row) for row in rows]
+
     def update_memory(self, memory_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
-        current = next((m for m in self.memories(limit=1000) if m["id"] == memory_id), None)
+        current = self.memory(memory_id)
         if not current:
             return None
         previous_content = current["content"]
@@ -140,6 +212,10 @@ class Store:
         if isinstance(raw, str):
             try: result["embedding"] = json.loads(raw)
             except json.JSONDecodeError: result["embedding"] = None
+        result.setdefault("status", "active")
+        result.setdefault("reinforcement", 1)
+        result.setdefault("supersedes_id", None)
+        result.setdefault("last_reinforced_at", None)
         return result
 
     def delete_memory(self, memory_id: str) -> bool:
@@ -152,9 +228,10 @@ class Store:
         with self.lock:
             sessions = self.db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
             messages = self.db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-            memories = self.db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+            memories = self.db.execute("SELECT COUNT(*) FROM memories WHERE status='active'").fetchone()[0]
+            memories_superseded = self.db.execute("SELECT COUNT(*) FROM memories WHERE status='superseded'").fetchone()[0]
             traces = self.db.execute("SELECT COUNT(*) FROM turn_traces").fetchone()[0]
-        return {"sessions": sessions, "messages": messages, "memories": memories, "traces": traces}
+        return {"sessions": sessions, "messages": messages, "memories": memories, "memories_superseded": memories_superseded, "traces": traces}
 
     def search_messages(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
         with self.lock:
