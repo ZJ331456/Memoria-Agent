@@ -37,13 +37,21 @@ class MemoryEngine:
         self.embedder = embedder
         self.decider = decider
 
-    async def retrieve(self, query: str, limit: int = 8) -> list[dict]:
-        items = self.store.memories(limit=500)
+    async def retrieve(self, query: str, limit: int = 8, kinds: set[str] | None = None) -> list[dict]:
+        lexical_seed = self.store.keyword_memory_candidates(query, limit=200) if query.strip() else []
+        items = self.store.memories(limit=2000)
+        if kinds:
+            items = [item for item in items if item.get("kind") in kinds]
+            lexical_seed = [item for item in lexical_seed if item.get("kind") in kinds]
         if not query.strip() or not items:
             return []
         query_tokens = self._tokens(query)
         lexical_scores = {item["id"]: self._lexical_score(query, query_tokens, item) for item in items}
-        lexical = sorted((item for item in items if lexical_scores[item["id"]] > 0), key=lambda item: lexical_scores[item["id"]], reverse=True)
+        lexical_ids = {item["id"] for item in lexical_seed}
+        lexical = sorted(
+            (item for item in items if lexical_scores[item["id"]] > 0 or item["id"] in lexical_ids),
+            key=lambda item: (item["id"] in lexical_ids, lexical_scores[item["id"]]), reverse=True,
+        )
 
         query_vector: list[float] | None = None
         if self.embedder and self.embedder.enabled:
@@ -74,7 +82,8 @@ class MemoryEngine:
                 int(by_id[memory_id]["importance"]),
             ),
             reverse=True,
-        )[:max(1, limit)]
+        )
+        ranked_ids = self._apply_kind_quotas(ranked_ids, by_id, max(1, limit))
         result = []
         for memory_id in ranked_ids:
             item = dict(by_id[memory_id])
@@ -88,11 +97,11 @@ class MemoryEngine:
             result.append(item)
         return result
 
-    async def add_if_new(self, content: str, kind: str, importance: int, source: str) -> dict | None:
-        result = await self.remember(content, kind, importance, source)
+    async def add_if_new(self, content: str, kind: str, importance: int, source: str, source_ref: str | None = None) -> dict | None:
+        result = await self.remember(content, kind, importance, source, source_ref)
         return result.memory if result.action in {"created", "superseded"} else None
 
-    async def remember(self, content: str, kind: str, importance: int, source: str) -> MemoryWriteResult:
+    async def remember(self, content: str, kind: str, importance: int, source: str, source_ref: str | None = None) -> MemoryWriteResult:
         content = content.strip()
         if not content:
             return MemoryWriteResult("skipped", None, reason="empty content")
@@ -100,7 +109,9 @@ class MemoryEngine:
         canonical = self._canonical(content)
         for item in items:
             if item["kind"] == kind and canonical == self._canonical(item["content"]):
-                reinforced = self.store.reinforce_memory(item["id"])
+                if source_ref and self.store.has_memory_operation(source_ref, item["id"]):
+                    return MemoryWriteResult("skipped", item, item["id"], "source already applied")
+                reinforced = self.store.reinforce_memory(item["id"], source_ref)
                 return MemoryWriteResult("reinforced", reinforced, item["id"], "exact match")
 
         vector: list[float] | None = None
@@ -137,15 +148,17 @@ class MemoryEngine:
             target = next((item for item in related if item["id"] == target_id), None)
             action = decision.get("action", "create")
             if target and action == "reinforce" and float(target["relation_similarity"]) >= 0.78:
-                reinforced = self.store.reinforce_memory(target_id)
+                if source_ref and self.store.has_memory_operation(source_ref, target_id):
+                    return MemoryWriteResult("skipped", target, target_id, "source already applied")
+                reinforced = self.store.reinforce_memory(target_id, source_ref)
                 return MemoryWriteResult("reinforced", reinforced, target_id, decision.get("reason", ""))
             mutable_kinds = {"preference", "profile", "goal", "procedure"}
             if target and action == "supersede" and kind in mutable_kinds and float(target["relation_similarity"]) >= 0.55:
                 reason = decision.get("reason", "")
-                saved = self.store.add_memory(content, kind, importance, source, vector, target_id, reason)
+                saved = self.store.add_memory(content, kind, importance, source, vector, target_id, reason, source_ref)
                 return MemoryWriteResult("superseded", saved, target_id, reason)
 
-        saved = self.store.add_memory(content, kind, importance, source, vector)
+        saved = self.store.add_memory(content, kind, importance, source, vector, source_ref=source_ref)
         return MemoryWriteResult("created", saved, reason="independent memory")
 
     async def reindex(self, limit: int = 1000) -> dict[str, int | bool]:
@@ -217,3 +230,18 @@ class MemoryEngine:
             return ids.index(memory_id) + 1
         except ValueError:
             return None
+
+    @staticmethod
+    def _apply_kind_quotas(ids: list[str], by_id: dict[str, dict[str, Any]], limit: int) -> list[str]:
+        quotas = {"profile": 3, "preference": 3, "fact": 4, "goal": 3, "procedure": 2}
+        counts: dict[str, int] = {}
+        selected: list[str] = []
+        for memory_id in ids:
+            kind = str(by_id[memory_id].get("kind", "fact"))
+            if counts.get(kind, 0) >= quotas.get(kind, limit):
+                continue
+            selected.append(memory_id)
+            counts[kind] = counts.get(kind, 0) + 1
+            if len(selected) >= limit:
+                break
+        return selected

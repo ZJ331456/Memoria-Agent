@@ -1,0 +1,6 @@
+[
+  {"id":"preference-recall","query":"我喜欢怎样的回答风格？","expected_ids":["preference-concise"],"category":"preference"},
+  {"id":"goal-recall","query":"我最近的学习目标是什么？","expected_ids":["goal-rust"],"category":"goal"},
+  {"id":"superseded-exclusion","query":"我现在喜欢喝什么？","expected_ids":["preference-tea"],"forbidden_ids":["preference-coffee"],"category":"supersede"},
+  {"id":"greeting-gate","query":"你好","expected_ids":[],"category":"negative"}
+]

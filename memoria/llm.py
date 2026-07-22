@@ -4,6 +4,8 @@ import json
 import re
 import asyncio
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -26,6 +28,9 @@ class ChatResult:
     content: str = ""
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     raw_message: dict[str, Any] = field(default_factory=dict)
+    usage: dict[str, int] = field(default_factory=dict)
+    duration_ms: int = 0
+    retries: int = 0
 
 
 class LLMClient:
@@ -45,7 +50,7 @@ class LLMClient:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
         headers = {"Authorization": f"Bearer {selected.api_key}", "Content-Type": "application/json"}
-        data = await self._post(selected, headers, payload)
+        data, metrics = await self._post(selected, headers, payload)
         message = data["choices"][0]["message"]
         # DeepSeek reasoning 型模型在部分兼容端点只填 reasoning_content。
         # 正常 content 优先；否则回退 reasoning_content，避免成功请求得到空回复。
@@ -55,10 +60,12 @@ class LLMClient:
             try: arguments = json.loads(fn.get("arguments") or "{}")
             except json.JSONDecodeError: arguments = {}
             calls.append({"id": call.get("id", ""), "name": fn.get("name", ""), "arguments": arguments})
-        return ChatResult(str(message.get("content") or message.get("reasoning_content") or ""), calls, message)
+        usage = {key:int(value) for key,value in (data.get("usage") or {}).items() if isinstance(value, int)}
+        return ChatResult(str(message.get("content") or message.get("reasoning_content") or ""), calls, message, usage, metrics["duration_ms"], metrics["retries"])
 
-    async def _post(self, selected: ModelConfig, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post(self, selected: ModelConfig, headers: dict[str, str], payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
         last_error: Exception | None = None
+        started = time.perf_counter()
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
         async with httpx.AsyncClient(timeout=timeout) as client:
             for attempt in range(self.settings.max_retries + 1):
@@ -66,7 +73,7 @@ class LLMClient:
                     response = await client.post(f"{selected.base_url}/chat/completions", headers=headers, json=payload)
                     if response.status_code >= 400:
                         self._raise_response_error(response)
-                    return response.json()
+                    return response.json(), {"duration_ms": int((time.perf_counter()-started)*1000), "retries": attempt}
                 except (ContextLengthError, ContentSafetyError):
                     raise
                 except (httpx.TimeoutException, httpx.TransportError, ProviderError) as exc:
@@ -79,6 +86,62 @@ class LLMClient:
                     logger.warning("LLM 请求失败，%.1f 秒后重试 attempt=%d/%d model=%s error=%s", delay, attempt+1, self.settings.max_retries+1, selected.model, type(exc).__name__)
                     await asyncio.sleep(delay)
         raise ProviderError(str(last_error or "模型请求失败"))
+
+    async def chat_stream(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, on_delta: Callable[[str], Awaitable[None]] | None = None) -> ChatResult:
+        selected = self.settings.main
+        if not selected.api_key or not selected.base_url or not selected.model:
+            raise RuntimeError("主模型未完整配置，请检查 config.toml")
+        payload: dict[str, Any] = {"model": selected.model, "messages": messages, "max_tokens": self.settings.max_tokens, "stream": True, "stream_options": {"include_usage": True}}
+        if tools:
+            payload.update({"tools": tools, "tool_choice": "auto"})
+        headers = {"Authorization": f"Bearer {selected.api_key}", "Content-Type": "application/json"}
+        started = time.perf_counter()
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        call_parts: dict[int, dict[str, Any]] = {}
+        usage: dict[str, int] = {}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self.settings.request_timeout_seconds)) as client:
+            async with client.stream("POST", f"{selected.base_url}/chat/completions", headers=headers, json=payload) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    self._raise_response_error(response)
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if not raw or raw == "[DONE]":
+                        continue
+                    event = json.loads(raw)
+                    if event.get("usage"):
+                        usage = {key:int(value) for key,value in event["usage"].items() if isinstance(value, int)}
+                    choices = event.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    text = str(delta.get("content") or "")
+                    if text:
+                        content_parts.append(text)
+                        if on_delta:
+                            await on_delta(text)
+                    reasoning = str(delta.get("reasoning_content") or "")
+                    if reasoning:
+                        reasoning_parts.append(reasoning)
+                    for fragment in delta.get("tool_calls") or []:
+                        index = int(fragment.get("index", 0))
+                        target = call_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                        if fragment.get("id"): target["id"] = fragment["id"]
+                        function = fragment.get("function") or {}
+                        if function.get("name"): target["name"] = function["name"]
+                        target["arguments"] += str(function.get("arguments") or "")
+        calls, raw_calls = [], []
+        for item in call_parts.values():
+            try: arguments = json.loads(item["arguments"] or "{}")
+            except json.JSONDecodeError: arguments = {}
+            calls.append({"id":item["id"],"name":item["name"],"arguments":arguments})
+            raw_calls.append({"id":item["id"],"type":"function","function":{"name":item["name"],"arguments":item["arguments"] or "{}"}})
+        content = "".join(content_parts) or "".join(reasoning_parts)
+        raw_message = {"role":"assistant","content":content or None,"tool_calls":raw_calls}
+        return ChatResult(content, calls, raw_message, usage, int((time.perf_counter()-started)*1000), 0)
 
     @staticmethod
     def _raise_response_error(response: httpx.Response) -> None:
@@ -101,8 +164,9 @@ class LLMClient:
             match = re.search(r"\[[\s\S]*\]", raw)
             parsed = json.loads(match.group(0) if match else raw)
             return [x for x in parsed if isinstance(x, dict) and str(x.get("content", "")).strip()][:3]
-        except Exception:
-            return []
+        except Exception as exc:
+            logger.warning("记忆提取失败，将由后台任务重试: %s", type(exc).__name__)
+            raise
 
     async def decide_memory_relation(self, content: str, kind: str, candidates: list[dict[str, Any]]) -> dict[str, str]:
         """Conservatively classify a new memory against pre-filtered same-kind candidates."""
@@ -139,3 +203,17 @@ class LLMClient:
         except Exception as exc:
             logger.warning("记忆一致性判定失败，保守创建新记忆: %s", type(exc).__name__)
             return {"action": "create", "target_id": "", "reason": "decision unavailable"}
+
+    async def plan_memory_retrieval(self, query: str, history: list[dict[str, Any]]) -> dict[str, Any]:
+        system = """判断回答当前问题是否需要长期记忆，并重写一个短检索词。只输出 JSON：
+{"needed":true,"query":"检索词","kinds":["preference","goal"],"limit":8,"reason":"简短原因"}
+问候、纯计算、与用户历史无关的一般知识通常不需要；涉及用户本人、偏好、目标、过往决定时需要。"""
+        compact = [{"role": item.get("role"), "content": str(item.get("content", ""))[:500]} for item in history[-6:]]
+        raw = await self.complete(
+            [{"role": "system", "content": system}, {"role": "user", "content": json.dumps({"query": query, "recent": compact}, ensure_ascii=False)}],
+            self.settings.fast if self.settings.fast.api_key else self.settings.main,
+            220,
+        )
+        match = re.search(r"\{[\s\S]*\}", raw)
+        data = json.loads(match.group(0) if match else raw)
+        return data if isinstance(data, dict) else {}

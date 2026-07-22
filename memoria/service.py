@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 from .config import Settings
 from .llm import LLMClient
 from .store import Store
-from .memory import EmbeddingClient, MemoryEngine
+from .memory import EmbeddingClient, MemoryEngine, MemoryJobWorker
 from .runtime import AgentRuntime
 from .tools import build_registry
 
@@ -14,11 +17,12 @@ class AgentService:
         embedder = EmbeddingClient(settings.embedding, min(settings.request_timeout_seconds, 30), settings.max_retries)
         memory = MemoryEngine(store, embedder, llm.decide_memory_relation)
         self.runtime = AgentRuntime(settings, store, llm, memory, build_registry(store, memory))
+        self.memory_worker = MemoryJobWorker(store, llm, memory)
 
     async def chat(self, session_id: str, content: str) -> tuple[dict, list[dict]]:
         message, memories, _ = await self.chat_with_trace(session_id, content)
         return message, memories
 
-    async def chat_with_trace(self, session_id: str, content: str) -> tuple[dict, list[dict], dict]:
+    async def chat_with_trace(self, session_id: str, content: str, on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None) -> tuple[dict, list[dict], dict]:
         if not self.store.session(session_id): raise KeyError(session_id)
-        return await self.runtime.run(session_id, content)
+        return await self.runtime.run(session_id, content, on_event)

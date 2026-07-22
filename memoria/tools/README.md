@@ -2,8 +2,8 @@
 
 ## 组成
 
-- `Tool`：名称、描述、JSON Schema、异步 executor、风险级别。
-- `ToolRegistry`：注册、schema 输出、参数校验、超时执行和目录查询。
+- `Tool`：名称、描述、JSON Schema、异步 executor、风险级别、独立超时和输出上限。
+- `ToolRegistry`：注册、schema 输出、严格参数校验、pre-hook、权限、超时执行和目录查询。
 - `ToolResult`：统一返回工具名、成功状态、文本内容和耗时。
 - `builtin.py`：不依赖外部通信软件的核心内置工具。
 
@@ -20,7 +20,7 @@
 
 ## 安全约束
 
-工具参数先按 JSON Schema 的 required/type 做校验，每次执行默认最多 15 秒。计算器不使用 `eval`，只允许数字和白名单算术节点，并限制表达式长度与指数大小。
+工具参数按 JSON Schema 的 required/type/additionalProperties 校验，每次执行默认最多 15 秒。非只读工具默认拒绝，必须获得明确授权；执行结果默认最多 12000 字，取消异常继续向上传播。计算器不使用 `eval`，只允许数字和白名单算术节点。
 
 新增工具时应明确 `risk`。文件写入、Shell、网络 POST 等高副作用工具不能作为默认工具直接加入，必须先实现确认策略、作用域和审计。
 

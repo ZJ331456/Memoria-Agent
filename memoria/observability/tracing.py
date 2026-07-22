@@ -12,10 +12,10 @@ class TurnTracer:
         self.store, self.session_id = store, session_id
         self.started = time.perf_counter()
 
-    def finish(self, status: str, steps: int, memories: list[dict], tools: list[dict], error: str | None = None) -> dict:
+    def finish(self, status: str, steps: int, memories: list[dict], tools: list[dict], error: str | None = None, metadata: dict[str, Any] | None = None) -> dict:
         safe_memories = [{key:item.get(key) for key in ("id","kind","importance","source") if key in item} for item in memories]
         safe_tools = _sanitize(tools)
-        return self.store.add_trace(self.session_id, status, steps, int((time.perf_counter()-self.started)*1000), safe_memories, safe_tools, _redact_text(error) if error else None)
+        return self.store.add_trace(self.session_id, status, steps, int((time.perf_counter()-self.started)*1000), safe_memories, safe_tools, _redact_text(error) if error else None, _sanitize(metadata or {}))
 
 
 _SENSITIVE_KEYS = {"api_key", "apikey", "authorization", "password", "secret", "token", "access_token", "client_secret"}

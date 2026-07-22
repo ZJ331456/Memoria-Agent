@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -124,6 +126,7 @@ class TraceResponse(BaseModel):
     duration_ms: int
     memories: list[dict[str, Any]]
     tools: list[dict[str, Any]]
+    metadata: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
     created_at: str
 
@@ -132,6 +135,31 @@ class ChatResponse(BaseModel):
     message: MessageResponse
     memories_created: list[MemoryResponse]
     trace: TraceResponse
+
+
+class CancelResponse(BaseModel):
+    status: Literal["cancelled", "idle"]
+    session_id: str
+
+
+class MemoryUndoBody(StrictModel):
+    source_refs: list[str] = Field(min_length=1, max_length=100)
+    dry_run: bool = False
+
+
+class MemoryUndoResponse(BaseModel):
+    affected_ids: list[str]
+    restored_ids: list[str]
+
+
+class MemoryJobResponse(BaseModel):
+    id: str
+    source_ref: str
+    status: str
+    attempts: int
+    error: str | None = None
+    created_at: str
+    updated_at: str
 
 
 class ToolExecuteBody(StrictModel):
@@ -146,7 +174,7 @@ class ToolExecuteResponse(BaseModel):
     elapsed_ms: int
 
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
     {"name": "sessions", "description": "会话生命周期和消息历史。"},
@@ -162,10 +190,16 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     store = Store(settings.database)
     service = AgentService(settings, store, LLMClient(settings))
     session_locks: dict[str, asyncio.Lock] = {}
+    active_turns: dict[str, asyncio.Task] = {}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        memory_task = asyncio.create_task(service.memory_worker.run(), name="memoria-memory-worker")
         yield
+        memory_task.cancel()
+        with suppress(asyncio.CancelledError): await memory_task
+        for task in active_turns.values(): task.cancel()
+        if active_turns: await asyncio.gather(*active_turns.values(), return_exceptions=True)
         store.close()
 
     app = FastAPI(
@@ -180,11 +214,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
+        started = time.perf_counter()
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Process-Time-Ms"] = str(int((time.perf_counter() - started) * 1000))
         return response
 
     @app.exception_handler(RequestValidationError)
@@ -214,7 +250,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         tool = catalog.get(tool_name)
         if not tool: raise HTTPException(404, "工具不存在")
         if tool["risk"] != "read-only" and not body.confirm_write: raise HTTPException(409, "写工具需要 confirm_write=true")
-        return await service.runtime.tools.execute(tool_name, body.arguments)
+        return await service.runtime.tools.execute(tool_name, body.arguments, allow_write=body.confirm_write)
 
     @app.get("/api/traces", response_model=list[TraceResponse], tags=["traces"], summary="查询最近运行追踪")
     def traces(session_id: str = Query(default="", max_length=64), limit: int = Query(default=50, ge=1, le=200)):
@@ -253,12 +289,63 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if lock.locked(): raise HTTPException(409, "该会话已有一轮对话正在执行")
         try:
             async with lock:
-                message, memories, trace = await service.chat_with_trace(session_id, body.content.strip())
+                task = asyncio.create_task(service.chat_with_trace(session_id, body.content.strip()))
+                active_turns[session_id] = task
+                message, memories, trace = await task
             return {"message": message, "memories_created": memories, "trace": trace}
         except HTTPException: raise
         except Exception as exc: raise HTTPException(502, f"模型调用失败：{type(exc).__name__}: {exc}") from exc
         finally:
+            active_turns.pop(session_id, None)
             if not lock.locked(): session_locks.pop(session_id, None)
+
+    @app.post("/api/sessions/{session_id}/chat/stream", tags=["agent"], summary="以 SSE 流式执行一轮 Agent 对话")
+    async def chat_stream(session_id: str, body: ChatBody, request: Request):
+        if not store.session(session_id): raise HTTPException(404, "会话不存在")
+        lock = session_locks.setdefault(session_id, asyncio.Lock())
+        if lock.locked() or session_id in active_turns: raise HTTPException(409, "该会话已有一轮对话正在执行")
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async def emit(event: dict[str, Any]): await queue.put(event)
+        async def worker():
+            try:
+                async with lock:
+                    message, memories, trace = await service.chat_with_trace(session_id, body.content.strip(), emit)
+                await queue.put({"type":"complete","message":message,"memories_created":memories,"trace":trace})
+            except asyncio.CancelledError:
+                await queue.put({"type":"cancelled","session_id":session_id})
+                raise
+            except Exception as exc:
+                await queue.put({"type":"error","message":f"{type(exc).__name__}: {exc}"})
+            finally:
+                active_turns.pop(session_id, None)
+                if not lock.locked(): session_locks.pop(session_id, None)
+                await queue.put(None)
+
+        task = asyncio.create_task(worker())
+        active_turns[session_id] = task
+
+        async def events():
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        task.cancel()
+                        break
+                    try: event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                    except asyncio.TimeoutError: continue
+                    if event is None: break
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            finally:
+                if not task.done(): task.cancel()
+                with suppress(asyncio.CancelledError): await task
+        return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+
+    @app.post("/api/sessions/{session_id}/cancel", response_model=CancelResponse, tags=["agent"], summary="取消正在执行的 Agent turn")
+    async def cancel_turn(session_id: str):
+        task = active_turns.get(session_id)
+        if not task or task.done(): return {"status":"idle","session_id":session_id}
+        task.cancel()
+        return {"status":"cancelled","session_id":session_id}
 
     @app.delete("/api/sessions/{session_id}", status_code=204, tags=["sessions"], summary="删除会话及其消息")
     def delete_session(session_id: str):
@@ -280,6 +367,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.post("/api/memories/reindex", response_model=MemoryReindexResponse, tags=["memories"], summary="回填长期记忆语义向量")
     async def reindex_memories(limit: int = Query(default=1000, ge=1, le=5000)):
         return await service.runtime.memory.reindex(limit)
+
+    @app.get("/api/memory-jobs", response_model=list[MemoryJobResponse], tags=["memories"], summary="查询后台记忆任务")
+    def memory_jobs(limit: int = Query(default=50, ge=1, le=200)):
+        return store.memory_jobs(limit)
+
+    @app.post("/api/memories/undo", response_model=MemoryUndoResponse, tags=["memories"], summary="按消息来源撤销自动记忆")
+    def undo_memories(body: MemoryUndoBody):
+        return store.undo_memory_sources(body.source_refs, body.dry_run)
 
     @app.get("/api/memories/{memory_id}/history", response_model=list[MemoryReplacementResponse], tags=["memories"], summary="查询记忆替代历史")
     def memory_history(memory_id: str):

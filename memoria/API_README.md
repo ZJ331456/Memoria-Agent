@@ -33,7 +33,7 @@ FastAPI route
 
 - Session：`SessionBody`、`SessionPatch`、`SessionResponse`
 - Chat：`ChatBody`、`ChatResponse`、`MessageResponse`
-- Memory：`MemoryBody`、`MemoryPatch`、`MemoryResponse`、`MemoryWriteResponse`、`MemoryReindexResponse`、`MemoryReplacementResponse`
+- Memory：另含 `MemoryUndoBody`、`MemoryUndoResponse` 和 `MemoryJobResponse`，支持后台任务与来源撤销。
 - Tool：`ToolExecuteBody`、`ToolExecuteResponse`
 - Trace/System：`TraceResponse`、`HealthResponse`、`ErrorResponse`
 
@@ -45,7 +45,7 @@ FastAPI route
 |---|---|---|
 | `system` | `/api/health`、`/api/overview` | 存活状态和脱敏运行时信息 |
 | `sessions` | `/api/sessions...` | 会话和消息 CRUD |
-| `agent` | `/api/sessions/{id}/chat` | 完整 Agent turn |
+| `agent` | `/api/sessions/{id}/chat`、`chat/stream`、`cancel` | 完整 Agent turn、SSE 与取消 |
 | `memories` | `/api/memories...` | 语义检索、强化/替代写入、编辑、删除、历史和向量回填 |
 | `tools` | `/api/tools...` | 工具目录和受确认保护的调试执行 |
 | `traces` | `/api/traces` | 推理运行追踪 |
@@ -55,9 +55,10 @@ FastAPI route
 ## 5. 并发与错误边界
 
 - 每个 session 使用独立 `asyncio.Lock`，同一会话的并发 turn 返回 409，不同会话可以并行。
+- active turn 在浏览器断连、显式 cancel 和服务关闭时取消；后台记忆 worker 由 lifespan 同步启停。
 - FastAPI 校验错误转换为统一 `{code, message, request_id}`。
 - Agent 或模型上游异常转换为 502；404 和 409 保留明确业务语义。
-- 所有响应携带 `X-Request-ID` 和 `X-Content-Type-Options: nosniff`。
+- 所有响应携带 `X-Request-ID`、`X-Process-Time-Ms` 和 `X-Content-Type-Options: nosniff`。
 - CORS 当前只允许本地 Vite 开发地址，适用于可信本机环境。
 
 ## 6. 修改 API 的检查清单

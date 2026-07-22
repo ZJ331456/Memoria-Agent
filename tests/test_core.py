@@ -46,10 +46,14 @@ def test_openapi_and_tool_debug(tmp_path: Path):
     config.write_text(f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n[storage]\ndatabase="{tmp_path / 'api.db'}"\n''', encoding="utf-8")
     client = TestClient(create_app(config))
     schema = client.get("/openapi.json").json()
-    assert schema["info"]["version"] == "0.4.0"
+    assert schema["info"]["version"] == "0.5.0"
     assert "/api/tools/{tool_name}/execute" in schema["paths"]
     assert "/api/memories/reindex" in schema["paths"]
     assert "/api/memories/{memory_id}/history" in schema["paths"]
+    assert "/api/sessions/{session_id}/chat/stream" in schema["paths"]
+    assert "/api/sessions/{session_id}/cancel" in schema["paths"]
+    assert "/api/memories/undo" in schema["paths"]
+    assert "/api/memory-jobs" in schema["paths"]
     assert client.post("/api/memories/reindex").json() == {"enabled": False, "indexed": 0, "remaining": 0}
     result = client.post("/api/tools/calculate/execute", json={"arguments": {"expression": "6*7"}})
     assert result.status_code == 200 and result.json()["content"] == "42"
