@@ -1,0 +1,48 @@
+# 复制为 config.toml 后填写，config.toml 已被 .gitignore 忽略。
+# 推荐把真实 Key 放在环境变量中，不要提交到 Git。
+
+[llm]
+provider = "openai"
+request_timeout_seconds = 90
+max_retries = 2
+
+[llm.main]
+model = "deepseek-v4-flash"
+api_key = "${DEEPSEEK_API_KEY}"
+base_url = "https://api.deepseek.com/v1"
+multimodal = false
+
+[llm.fast]
+model = "qwen3.6-flash"
+api_key = "${DASHSCOPE_API_KEY}"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+[llm.vl]
+model = "qwen3.7-plus"
+api_key = "${DASHSCOPE_API_KEY}"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+[agent]
+system_prompt = "你是 Memoria，用户的长期 AI 伙伴。用与用户相同的语言回答。"
+max_tokens = 8192
+max_iterations = 20
+
+[agent.context]
+memory_window = 40
+char_budget = 60000
+
+[memory]
+enabled = true
+engine = ""
+
+[memory.embedding]
+model = "text-embedding-v3"
+api_key = "${DASHSCOPE_API_KEY}"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+[server]
+host = "127.0.0.1"
+port = 2237
+
+[storage]
+database = "data/memoria.db"

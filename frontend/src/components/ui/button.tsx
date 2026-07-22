@@ -1,0 +1,5 @@
+import * as React from 'react'; import { Slot } from '@radix-ui/react-slot'; import { cn } from '@/lib/utils'
+type Variant='default'|'outline'|'ghost'|'destructive';type Size='default'|'sm'|'icon';
+const variants:Record<Variant,string>={default:'bg-primary text-primary-foreground hover:opacity-90',outline:'border border-border bg-transparent hover:bg-accent',ghost:'hover:bg-accent',destructive:'bg-destructive text-white hover:opacity-90'};const sizes:Record<Size,string>={default:'h-10 px-4 py-2',sm:'h-9 px-3',icon:'h-9 w-9'}
+export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement>{asChild?:boolean;variant?:Variant;size?:Size}
+export const Button=React.forwardRef<HTMLButtonElement,ButtonProps>(({className,variant='default',size='default',asChild=false,...props},ref)=>{const Comp=asChild?Slot:'button';return <Comp className={cn('inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50',variants[variant],sizes[size],className)} ref={ref} {...props}/>}); Button.displayName='Button'
