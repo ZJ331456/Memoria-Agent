@@ -8,6 +8,10 @@
 
 HTTP 响应提供 `X-Request-ID` 与 `X-Process-Time-Ms`；overview 提供待处理和失败的记忆任务数。
 
+## Prometheus 指标
+
+`GET /metrics` 使用无额外依赖的文本 exporter，提供按 method/route/status 分类的请求计数与耗时、turn 状态、平均 turn 延迟、最近 trace token 总量、各状态任务数和有效记忆数。启用 API Token 时 metrics 同样需要认证。
+
 ## 安全说明
 
 trace 不存模型 API Key。未来加入完整 prompt snapshot 时必须默认关闭或做敏感字段脱敏；生产环境还应设置保存期限和结果大小上限。

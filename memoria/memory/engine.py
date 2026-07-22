@@ -13,6 +13,7 @@ from .embedding import EmbeddingClient
 
 logger = logging.getLogger(__name__)
 MemoryDecider = Callable[[str, str, list[dict[str, Any]]], Awaitable[dict[str, str]]]
+_STOP_TOKENS = {"我的", "什么", "是什么", "用户", "现在", "偏好", "目标", "信息", "the", "what", "your", "user"}
 
 
 @dataclass(slots=True)
@@ -32,26 +33,23 @@ class MemoryWriteResult:
 class MemoryEngine:
     """Keyword + vector retrieval with RRF fusion and graceful lexical fallback."""
 
-    def __init__(self, store: Store, embedder: EmbeddingClient | None = None, decider: MemoryDecider | None = None):
+    def __init__(self, store: Store, embedder: EmbeddingClient | None = None, decider: MemoryDecider | None = None, vector_scan_limit: int = 2000):
         self.store = store
         self.embedder = embedder
         self.decider = decider
+        self.vector_scan_limit = max(100, vector_scan_limit)
 
     async def retrieve(self, query: str, limit: int = 8, kinds: set[str] | None = None) -> list[dict]:
         lexical_seed = self.store.keyword_memory_candidates(query, limit=200) if query.strip() else []
-        items = self.store.memories(limit=2000)
+        indexed = self.store.vector_index_status["enabled"]
+        items = self.store.memories(limit=200 if indexed else self.vector_scan_limit)
         if kinds:
             items = [item for item in items if item.get("kind") in kinds]
             lexical_seed = [item for item in lexical_seed if item.get("kind") in kinds]
-        if not query.strip() or not items:
+        if not query.strip():
             return []
-        query_tokens = self._tokens(query)
-        lexical_scores = {item["id"]: self._lexical_score(query, query_tokens, item) for item in items}
-        lexical_ids = {item["id"] for item in lexical_seed}
-        lexical = sorted(
-            (item for item in items if lexical_scores[item["id"]] > 0 or item["id"] in lexical_ids),
-            key=lambda item: (item["id"] in lexical_ids, lexical_scores[item["id"]]), reverse=True,
-        )
+        by_id = {item["id"]: item for item in [*items, *lexical_seed]}
+        items = list(by_id.values())
 
         query_vector: list[float] | None = None
         if self.embedder and self.embedder.enabled:
@@ -63,11 +61,27 @@ class MemoryEngine:
 
         vector_scores: dict[str, float] = {}
         if query_vector:
-            for item in items:
-                vector = item.get("embedding")
-                if vector and len(vector) == len(query_vector):
-                    vector_scores[item["id"]] = self._cosine(query_vector, vector)
-        semantic = sorted((item for item in items if vector_scores.get(item["id"], -1) > 0.15), key=lambda item: vector_scores[item["id"]], reverse=True)
+            if indexed:
+                for item, similarity in self.store.vector_memory_candidates(query_vector, max(limit * 8, 64)):
+                    if not kinds or item.get("kind") in kinds:
+                        by_id[item["id"]] = item
+                        vector_scores[item["id"]] = similarity
+                items = list(by_id.values())
+            else:
+                for item in items:
+                    vector = item.get("embedding")
+                    if vector and len(vector) == len(query_vector):
+                        vector_scores[item["id"]] = self._cosine(query_vector, vector)
+        query_tokens = self._tokens(query)
+        lexical_scores = {item["id"]: self._lexical_score(query, query_tokens, item) for item in items}
+        lexical_ids = {item["id"] for item in lexical_seed}
+        lexical = sorted(
+            (item for item in items if lexical_scores[item["id"]] > 0 or item["id"] in lexical_ids),
+            key=lambda item: (item["id"] in lexical_ids, lexical_scores[item["id"]]), reverse=True,
+        )
+        top_similarity = max(vector_scores.values(), default=-1.0)
+        semantic_floor = max(0.45, top_similarity - 0.18)
+        semantic = sorted((item for item in items if vector_scores.get(item["id"], -1) >= semantic_floor), key=lambda item: vector_scores[item["id"]], reverse=True)
 
         fused: dict[str, float] = {}
         lanes: dict[str, list[str]] = {"keyword": [item["id"] for item in lexical], "vector": [item["id"] for item in semantic]}
@@ -105,7 +119,9 @@ class MemoryEngine:
         content = content.strip()
         if not content:
             return MemoryWriteResult("skipped", None, reason="empty content")
-        items = self.store.memories(limit=1000)
+        indexed = self.store.vector_index_status["enabled"]
+        seeded = self.store.keyword_memory_candidates(content, limit=200)
+        items = list({item["id"]: item for item in [*seeded, *self.store.memories(limit=200 if indexed else 1000)]}.values())
         canonical = self._canonical(content)
         for item in items:
             if item["kind"] == kind and canonical == self._canonical(item["content"]):
@@ -122,6 +138,10 @@ class MemoryEngine:
             except Exception as exc:
                 logger.warning("记忆向量去重不可用，使用文本去重: %s", type(exc).__name__)
                 vector = None
+
+        if vector and indexed:
+            indexed_candidates = [item for item, _ in self.store.vector_memory_candidates(vector, 64)]
+            items = list({item["id"]: item for item in [*items, *indexed_candidates]}.values())
 
         normalized = self._normalize(content)
         related: list[dict[str, Any]] = []
@@ -196,7 +216,7 @@ class MemoryEngine:
             tokens.update(sequence[index:index + 2] for index in range(max(1, len(sequence) - 1)))
             if len(sequence) <= 4:
                 tokens.add(sequence)
-        return {token for token in tokens if token}
+        return {token for token in tokens if token and token not in _STOP_TOKENS}
 
     @classmethod
     def _lexical_score(cls, query: str, query_tokens: set[str], item: dict) -> float:

@@ -13,7 +13,7 @@ from ..memory import MemoryEngine, MemoryQueryPlanner
 from ..observability import TurnTracer
 from ..prompting import ContextBudget
 from ..store import Store
-from ..tools import ToolRegistry
+from ..tools import ToolPolicy, ToolRegistry
 from ..tools.loop_guard import ToolLoopGuard
 
 
@@ -23,6 +23,7 @@ class AgentRuntime:
         self.pipeline = pipeline or Pipeline()
         self.context_budget = ContextBudget(settings.context_char_budget)
         self.retrieval_planner = MemoryQueryPlanner(llm.plan_memory_retrieval)
+        self.tool_policy = ToolPolicy()
 
     async def run(self, session_id: str, user_text: str, on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None) -> tuple[dict, list[dict], dict]:
         tracer = TurnTracer(self.store, session_id)
@@ -48,6 +49,8 @@ class AgentRuntime:
             await self.pipeline.run(Phase.BEFORE_REASONING, context)
             max_steps = min(max(self.settings.max_iterations, 1), 20)
             loop_guard = ToolLoopGuard(max_identical=2)
+            authorization = self.tool_policy.authorize(user_text)
+            context.metadata["tool_authorization"] = {"allowed_write_tools": sorted(authorization.allowed_write_tools), "reason": authorization.reason}
             for step in range(max_steps):
                 budget = self.context_budget.apply(context.messages)
                 context.messages = budget.messages
@@ -79,7 +82,7 @@ class AgentRuntime:
                     context.response = summary.content or "检测到重复工具调用，已安全停止。"
                     break
                 for call in result.tool_calls:
-                    tool_result = await self.tools.execute(call["name"], call["arguments"], allow_write=self._allows_write(user_text))
+                    tool_result = await self.tools.execute(call["name"], call["arguments"], allowed_write_tools=authorization.allowed_write_tools)
                     record = {"step":step+1,"name":call["name"],"arguments":call["arguments"],"ok":tool_result.ok,"elapsed_ms":tool_result.elapsed_ms,"preview":tool_result.content[:300]}
                     context.tool_chain.append(record)
                     if on_event: await on_event({"type":"tool","tool":record})
@@ -104,8 +107,3 @@ class AgentRuntime:
     def _record_llm(context: TurnContext, result) -> None:
         calls = context.metadata.setdefault("llm_calls", [])
         calls.append({"duration_ms":result.duration_ms,"retries":result.retries,"usage":result.usage})
-
-    @staticmethod
-    def _allows_write(user_text: str) -> bool:
-        lowered = user_text.lower()
-        return any(token in lowered for token in ("记住", "保存", "添加记忆", "忘掉", "删除记忆", "remember", "memorize", "forget"))

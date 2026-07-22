@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager, suppress
@@ -18,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from .config import Settings
 from .llm import LLMClient
 from .service import AgentService
+from .security import RequestGate
+from .observability import MetricRegistry
 from .store import Store
 
 MemoryKind = Literal["fact", "preference", "profile", "goal", "procedure"]
@@ -158,6 +161,9 @@ class MemoryJobResponse(BaseModel):
     status: str
     attempts: int
     error: str | None = None
+    available_at: str | None = None
+    lease_owner: str | None = None
+    lease_expires_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -174,7 +180,7 @@ class ToolExecuteResponse(BaseModel):
     elapsed_ms: int
 
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
     {"name": "sessions", "description": "会话生命周期和消息历史。"},
@@ -187,10 +193,12 @@ TAGS = [
 
 def create_app(config_path: str | Path | None = None) -> FastAPI:
     settings = Settings.load(config_path)
-    store = Store(settings.database)
+    store = Store(settings.database, settings.vector_backend)
     service = AgentService(settings, store, LLMClient(settings))
     session_locks: dict[str, asyncio.Lock] = {}
     active_turns: dict[str, asyncio.Task] = {}
+    request_gate = RequestGate(settings)
+    metrics = MetricRegistry()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -209,18 +217,27 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         openapi_tags=TAGS, lifespan=lifespan,
         responses={422: {"model": ErrorResponse, "description": "请求校验失败"}},
     )
-    app.state.settings, app.state.store, app.state.service = settings, store, service
-    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-Request-ID"])
+    app.state.settings, app.state.store, app.state.service, app.state.metrics = settings, store, service, metrics
+    app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-Request-ID", "Authorization", "X-API-Key"])
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
         started = time.perf_counter()
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         request.state.request_id = request_id
-        response = await call_next(request)
+        denied = request_gate.check(request)
+        if denied:
+            status, code, message, headers = denied
+            response = _error(request, status, code, message)
+            response.headers.update(headers)
+        else:
+            response = await call_next(request)
+        duration = time.perf_counter() - started
+        route = getattr(request.scope.get("route"), "path", None) or re.sub(r"/[A-Fa-f0-9-]{16,}(?=/|$)", "/{id}", request.url.path)
+        metrics.observe_http(request.method, route, response.status_code, duration)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Process-Time-Ms"] = str(int((time.perf_counter() - started) * 1000))
+        response.headers["X-Process-Time-Ms"] = str(int(duration * 1000))
         return response
 
     @app.exception_handler(RequestValidationError)
@@ -236,9 +253,15 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     def health() -> HealthResponse:
         return HealthResponse(version=VERSION)
 
+    @app.get("/metrics", include_in_schema=False)
+    def prometheus_metrics():
+        if not settings.metrics_enabled:
+            raise HTTPException(404, "metrics disabled")
+        return Response(metrics.render(store), media_type="text/plain; version=0.0.4")
+
     @app.get("/api/overview", tags=["system"], summary="获取 Dashboard 总览")
     def overview() -> dict[str, Any]:
-        return {**store.overview(), "models": settings.public_dict(), "tools": service.runtime.tools.catalog(), "pipeline": service.runtime.pipeline.inspect()}
+        return {**store.overview(), "models": settings.public_dict(), "vector_index": store.vector_index_status, "tools": service.runtime.tools.catalog(), "pipeline": service.runtime.pipeline.inspect()}
 
     @app.get("/api/tools", tags=["tools"], summary="列出模型可调用工具")
     def tools() -> list[dict[str, str]]:
@@ -372,6 +395,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     def memory_jobs(limit: int = Query(default=50, ge=1, le=200)):
         return store.memory_jobs(limit)
 
+    @app.post("/api/memory-jobs/{job_id}/retry", response_model=MemoryJobResponse, tags=["memories"], summary="重试失败的记忆任务")
+    def retry_memory_job(job_id: str):
+        if not store.retry_memory_job(job_id):
+            raise HTTPException(409, "只有 failed 任务可以手动重试")
+        return store.memory_job(job_id)
+
     @app.post("/api/memories/undo", response_model=MemoryUndoResponse, tags=["memories"], summary="按消息来源撤销自动记忆")
     def undo_memories(body: MemoryUndoBody):
         return store.undo_memory_sources(body.source_refs, body.dry_run)
@@ -408,4 +437,4 @@ def _error(request: Request, status: int, code: str, message: str) -> JSONRespon
 
 
 def _error_code(status: int) -> str:
-    return {404: "not_found", 409: "conflict", 502: "upstream_error"}.get(status, "request_error")
+    return {401: "unauthorized", 403: "forbidden", 404: "not_found", 409: "conflict", 413: "payload_too_large", 429: "rate_limited", 502: "upstream_error"}.get(status, "request_error")

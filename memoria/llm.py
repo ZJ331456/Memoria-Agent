@@ -34,8 +34,9 @@ class ChatResult:
 
 
 class LLMClient:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
         self.settings = settings
+        self.transport = transport
 
     async def complete(self, messages: list[dict[str, str]], model: ModelConfig | None = None, max_tokens: int | None = None) -> str:
         result = await self.chat(messages, model=model, max_tokens=max_tokens)
@@ -67,7 +68,7 @@ class LLMClient:
         last_error: Exception | None = None
         started = time.perf_counter()
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
             for attempt in range(self.settings.max_retries + 1):
                 try:
                     response = await client.post(f"{selected.base_url}/chat/completions", headers=headers, json=payload)
@@ -96,52 +97,81 @@ class LLMClient:
             payload.update({"tools": tools, "tool_choice": "auto"})
         headers = {"Authorization": f"Bearer {selected.api_key}", "Content-Type": "application/json"}
         started = time.perf_counter()
-        content_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        call_parts: dict[int, dict[str, Any]] = {}
-        usage: dict[str, int] = {}
-        async with httpx.AsyncClient(timeout=httpx.Timeout(self.settings.request_timeout_seconds)) as client:
-            async with client.stream("POST", f"{selected.base_url}/chat/completions", headers=headers, json=payload) as response:
-                if response.status_code >= 400:
-                    await response.aread()
-                    self._raise_response_error(response)
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    raw = line[5:].strip()
-                    if not raw or raw == "[DONE]":
-                        continue
-                    event = json.loads(raw)
-                    if event.get("usage"):
-                        usage = {key:int(value) for key,value in event["usage"].items() if isinstance(value, int)}
-                    choices = event.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    text = str(delta.get("content") or "")
-                    if text:
-                        content_parts.append(text)
-                        if on_delta:
-                            await on_delta(text)
-                    reasoning = str(delta.get("reasoning_content") or "")
-                    if reasoning:
-                        reasoning_parts.append(reasoning)
-                    for fragment in delta.get("tool_calls") or []:
-                        index = int(fragment.get("index", 0))
-                        target = call_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
-                        if fragment.get("id"): target["id"] = fragment["id"]
-                        function = fragment.get("function") or {}
-                        if function.get("name"): target["name"] = function["name"]
-                        target["arguments"] += str(function.get("arguments") or "")
-        calls, raw_calls = [], []
-        for item in call_parts.values():
-            try: arguments = json.loads(item["arguments"] or "{}")
-            except json.JSONDecodeError: arguments = {}
-            calls.append({"id":item["id"],"name":item["name"],"arguments":arguments})
-            raw_calls.append({"id":item["id"],"type":"function","function":{"name":item["name"],"arguments":item["arguments"] or "{}"}})
-        content = "".join(content_parts) or "".join(reasoning_parts)
-        raw_message = {"role":"assistant","content":content or None,"tool_calls":raw_calls}
-        return ChatResult(content, calls, raw_message, usage, int((time.perf_counter()-started)*1000), 0)
+        last_error: Exception | None = None
+        attempt = 0
+        while attempt <= self.settings.max_retries:
+            content_parts: list[str] = []
+            reasoning_parts: list[str] = []
+            call_parts: dict[int, dict[str, Any]] = {}
+            usage: dict[str, int] = {}
+            emitted = False
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(self.settings.request_timeout_seconds), transport=self.transport) as client:
+                    async with client.stream("POST", f"{selected.base_url}/chat/completions", headers=headers, json=payload) as response:
+                        if response.status_code >= 400:
+                            await response.aread()
+                            lowered = response.text.lower()
+                            if "stream_options" in payload and response.status_code in {400, 422} and ("stream_options" in lowered or "unknown" in lowered or "unsupported" in lowered):
+                                payload.pop("stream_options", None)
+                                continue
+                            self._raise_response_error(response)
+                        async for line in response.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            raw = line[5:].strip()
+                            if not raw or raw == "[DONE]":
+                                continue
+                            try:
+                                event = json.loads(raw)
+                            except json.JSONDecodeError:
+                                logger.warning("忽略无法解析的 SSE 行: %s", raw[:120])
+                                continue
+                            if event.get("error"):
+                                raise ProviderError(f"模型流返回错误: {str(event['error'])[:300]}")
+                            if event.get("usage"):
+                                usage = {key:int(value) for key,value in event["usage"].items() if isinstance(value, int) and not isinstance(value, bool)}
+                            choices = event.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            text = str(delta.get("content") or "")
+                            if text:
+                                emitted = True
+                                content_parts.append(text)
+                                if on_delta:
+                                    await on_delta(text)
+                            reasoning = str(delta.get("reasoning_content") or "")
+                            if reasoning:
+                                reasoning_parts.append(reasoning)
+                            for fragment in delta.get("tool_calls") or []:
+                                emitted = True
+                                index = int(fragment.get("index", 0))
+                                target = call_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                                if fragment.get("id"): target["id"] = fragment["id"]
+                                function = fragment.get("function") or {}
+                                if function.get("name"): target["name"] = function["name"]
+                                target["arguments"] += str(function.get("arguments") or "")
+                calls, raw_calls = [], []
+                for item in call_parts.values():
+                    try: arguments = json.loads(item["arguments"] or "{}")
+                    except json.JSONDecodeError: arguments = {}
+                    calls.append({"id":item["id"],"name":item["name"],"arguments":arguments})
+                    raw_calls.append({"id":item["id"],"type":"function","function":{"name":item["name"],"arguments":item["arguments"] or "{}"}})
+                content = "".join(content_parts) or "".join(reasoning_parts)
+                raw_message = {"role":"assistant","content":content or None,"tool_calls":raw_calls}
+                return ChatResult(content, calls, raw_message, usage, int((time.perf_counter()-started)*1000), attempt)
+            except (ContextLengthError, ContentSafetyError, asyncio.CancelledError):
+                raise
+            except (httpx.TimeoutException, httpx.TransportError, ProviderError) as exc:
+                last_error = exc
+                if emitted:
+                    raise ProviderError("流式响应已输出部分内容后中断，为避免重复内容未自动重试") from exc
+                if not self._retryable(exc) or attempt >= self.settings.max_retries:
+                    if isinstance(exc, ProviderError): raise
+                    raise ProviderError(f"模型流连接失败: {type(exc).__name__}: {exc}") from exc
+                await asyncio.sleep(min(8.0, float(2**attempt)))
+                attempt += 1
+        raise ProviderError(str(last_error or "模型流请求失败"))
 
     @staticmethod
     def _raise_response_error(response: httpx.Response) -> None:

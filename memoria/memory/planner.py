@@ -24,6 +24,7 @@ class MemoryQueryPlanner:
 
     _GREETINGS = {"hi", "hello", "你好", "您好", "嗨", "谢谢", "thanks", "在吗"}
     _MEMORY_HINTS = re.compile(r"记得|以前|上次|我的|我喜欢|我偏好|我计划|remember|previous|my\b", re.I)
+    _GENERAL_HINTS = re.compile(r"^(请)?(解释|介绍|说明|总结)|什么是|怎么实现|如何实现|how\s+to|what\s+is", re.I)
 
     def __init__(self, planner: Planner | None = None):
         self.planner = planner
@@ -34,6 +35,8 @@ class MemoryQueryPlanner:
             return RetrievalPlan(False, cleaned, reason="greeting_or_empty")
         if len(cleaned) <= 3 and not self._MEMORY_HINTS.search(cleaned):
             return RetrievalPlan(False, cleaned, reason="short_query")
+        if self._GENERAL_HINTS.search(cleaned) and not self._MEMORY_HINTS.search(cleaned):
+            return RetrievalPlan(False, cleaned, reason="general_knowledge")
         fallback = RetrievalPlan(True, cleaned, reason="memory_hint" if self._MEMORY_HINTS.search(cleaned) else "default")
         if not self.planner:
             return fallback

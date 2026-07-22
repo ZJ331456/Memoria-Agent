@@ -6,4 +6,13 @@
 python -m eval.memory_eval predictions.json -k 5
 ```
 
-输出 `recall_at_k`、`mean_reciprocal_rank` 和 `wrong_injection_rate`。线上改动前应保留同一数据集作回归；真实部署建议将 ID 替换为隔离测试库内的固定种子记忆。
+输出 Recall@K、Precision@K、MRR、错误注入率、禁用记忆命中率和门控准确率。
+
+仓库还提供 12 条可直接运行的中文种子评测：
+
+```bash
+python -m eval.run_seeded --min-recall 0.75
+python -m eval.run_seeded --embedding --min-recall 0.85
+```
+
+第二条会使用本仓库 `config.toml` 的 embedding 模型。线上改动前应固定数据集作回归，并逐步加入匿名真实失败案例。

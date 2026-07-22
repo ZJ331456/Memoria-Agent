@@ -40,9 +40,29 @@ model = "text-embedding-v3"
 api_key = "${DASHSCOPE_API_KEY}"
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
+[memory.retrieval]
+# auto 会优先使用可选 sqlite-vec，未安装时回退 JSON 向量扫描。
+vector_backend = "auto"
+vector_scan_limit = 2000
+
+[memory.worker]
+lease_seconds = 180
+max_retries = 3
+backoff_seconds = 5
+
 [server]
 host = "127.0.0.1"
 port = 2237
+
+[server.security]
+# 留空保持本地免登录；生产环境建议设为 ${MEMORIA_API_TOKEN}。
+api_token = ""
+allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+rate_limit_per_minute = 0
+max_request_bytes = 1048576
+
+[observability]
+metrics_enabled = true
 
 [storage]
 database = "data/memoria.db"

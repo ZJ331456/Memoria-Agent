@@ -46,7 +46,7 @@ def test_openapi_and_tool_debug(tmp_path: Path):
     config.write_text(f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n[storage]\ndatabase="{tmp_path / 'api.db'}"\n''', encoding="utf-8")
     client = TestClient(create_app(config))
     schema = client.get("/openapi.json").json()
-    assert schema["info"]["version"] == "0.5.0"
+    assert schema["info"]["version"] == "0.6.0"
     assert "/api/tools/{tool_name}/execute" in schema["paths"]
     assert "/api/memories/reindex" in schema["paths"]
     assert "/api/memories/{memory_id}/history" in schema["paths"]

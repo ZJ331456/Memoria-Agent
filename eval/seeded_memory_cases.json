@@ -1,0 +1,26 @@
+{
+  "memories": [
+    {"id":"preference-concise","content":"用户偏好简洁直接的回答风格","kind":"preference","importance":5},
+    {"id":"goal-rust","content":"用户当前目标是系统学习 Rust","kind":"goal","importance":4},
+    {"id":"profile-shanghai","content":"用户常住上海","kind":"profile","importance":4},
+    {"id":"preference-tea","content":"用户现在喜欢喝红茶","kind":"preference","importance":4},
+    {"id":"procedure-backup","content":"发布前先运行测试，然后备份数据库","kind":"procedure","importance":5},
+    {"id":"fact-cat","content":"用户养了一只名叫布丁的猫","kind":"fact","importance":3},
+    {"id":"goal-marathon","content":"用户计划在十月完成第一次马拉松","kind":"goal","importance":4},
+    {"id":"preference-dark","content":"用户偏好深色界面主题","kind":"preference","importance":3}
+  ],
+  "cases": [
+    {"id":"preference-recall","query":"我的回答风格偏好是什么？","expected_ids":["preference-concise"]},
+    {"id":"goal-recall","query":"我的 Rust 学习目标是什么？","expected_ids":["goal-rust"]},
+    {"id":"profile-recall","query":"我常住哪个城市？","expected_ids":["profile-shanghai"]},
+    {"id":"drink-recall","query":"我现在喜欢喝什么茶？","expected_ids":["preference-tea"],"forbidden_ids":["preference-coffee"]},
+    {"id":"procedure-recall","query":"发布前的备份流程是什么？","expected_ids":["procedure-backup"]},
+    {"id":"pet-recall","query":"我的猫叫什么？","expected_ids":["fact-cat"]},
+    {"id":"marathon-recall","query":"十月的运动目标是什么？","expected_ids":["goal-marathon"]},
+    {"id":"theme-recall","query":"我偏好什么界面主题？","expected_ids":["preference-dark"]},
+    {"id":"greeting-gate","query":"你好","expected_ids":[]},
+    {"id":"thanks-gate","query":"谢谢","expected_ids":[]},
+    {"id":"short-gate","query":"嗯","expected_ids":[]},
+    {"id":"unrelated-knowledge","query":"解释一下量子纠缠","expected_ids":[]}
+  ]
+}

@@ -55,11 +55,13 @@ FastAPI route
 ## 5. 并发与错误边界
 
 - 每个 session 使用独立 `asyncio.Lock`，同一会话的并发 turn 返回 409，不同会话可以并行。
-- active turn 在浏览器断连、显式 cancel 和服务关闭时取消；后台记忆 worker 由 lifespan 同步启停。
+- active turn 在浏览器断连、显式 cancel 和服务关闭时取消；后台记忆 worker 由 lifespan 同步启停，并使用租约、heartbeat、指数退避支持多进程接管。
 - FastAPI 校验错误转换为统一 `{code, message, request_id}`。
 - Agent 或模型上游异常转换为 502；404 和 409 保留明确业务语义。
 - 所有响应携带 `X-Request-ID`、`X-Process-Time-Ms` 和 `X-Content-Type-Options: nosniff`。
 - CORS 当前只允许本地 Vite 开发地址，适用于可信本机环境。
+- `[server.security]` 可选启用 Bearer Token、Origin 白名单、限流和请求体上限；默认值保持本地开发兼容。
+- `/metrics` 使用 Prometheus 文本协议并在启用 Token 时受相同认证保护。
 
 ## 6. 修改 API 的检查清单
 

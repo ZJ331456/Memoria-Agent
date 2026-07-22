@@ -29,12 +29,12 @@ def build_registry(store: Store, memory: MemoryEngine | None = None) -> ToolRegi
     async def history(a): return store.search_messages(a["query"], int(a.get("limit", 6)))
     async def clock(a): return datetime.now(ZoneInfo(a.get("timezone", "Asia/Shanghai"))).isoformat()
     async def calculate(a): return _safe_calculate(a["expression"])
-    registry.register(Tool("recall_memory", "使用关键词和语义向量检索长期记忆。", _schema({"query":{"type":"string"},"limit":{"type":"integer"}}, ["query"]), recall))
-    registry.register(Tool("memorize", "明确保存一条值得长期保留的用户事实、偏好或目标。", _schema({"content":{"type":"string"},"kind":{"type":"string"},"importance":{"type":"integer"}}, ["content"]), memorize, "write"))
-    registry.register(Tool("forget_memory", "按记忆 ID 删除错误或用户要求遗忘的记忆。", _schema({"memory_id":{"type":"string"}}, ["memory_id"]), forget, "write"))
-    registry.register(Tool("search_history", "搜索过去会话消息。", _schema({"query":{"type":"string"},"limit":{"type":"integer"}}, ["query"]), history))
-    registry.register(Tool("current_time", "获取指定 IANA 时区的当前时间。", _schema({"timezone":{"type":"string"}}, []), clock))
-    registry.register(Tool("calculate", "安全计算基础算术表达式。", _schema({"expression":{"type":"string"}}, ["expression"]), calculate))
+    registry.register(Tool("recall_memory", "使用关键词和语义向量检索长期记忆。", _schema({"query":{"type":"string","minLength":1,"maxLength":300},"limit":{"type":"integer","minimum":1,"maximum":20}}, ["query"]), recall))
+    registry.register(Tool("memorize", "明确保存一条值得长期保留的用户事实、偏好或目标。", _schema({"content":{"type":"string","minLength":1,"maxLength":4000},"kind":{"type":"string","enum":["fact","preference","profile","goal","procedure"]},"importance":{"type":"integer","minimum":1,"maximum":5}}, ["content"]), memorize, "write"))
+    registry.register(Tool("forget_memory", "按记忆 ID 删除错误或用户要求遗忘的记忆。", _schema({"memory_id":{"type":"string","minLength":1,"maxLength":64}}, ["memory_id"]), forget, "write"))
+    registry.register(Tool("search_history", "搜索过去会话消息。", _schema({"query":{"type":"string","minLength":1,"maxLength":300},"limit":{"type":"integer","minimum":1,"maximum":20}}, ["query"]), history))
+    registry.register(Tool("current_time", "获取指定 IANA 时区的当前时间。", _schema({"timezone":{"type":"string","maxLength":64}}, []), clock))
+    registry.register(Tool("calculate", "安全计算基础算术表达式。", _schema({"expression":{"type":"string","minLength":1,"maxLength":120}}, ["expression"]), calculate))
     return registry
 
 
