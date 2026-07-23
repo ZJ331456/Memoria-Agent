@@ -1,10 +1,10 @@
-# Memoria API 单文件模块说明
+# Memoria API 包与单文件实现说明
 
 ## 1. 文件位置与目标
 
-HTTP API 的全部代码集中在 [`api.py`](api.py)。原来的 `api_models.py` 已合并并删除，今后新增或修改接口时只需要检查一个文件，同时仍通过清晰的代码分区保留可维护性。
+HTTP API 的全部实现集中在 [`app.py`](app.py)，包入口 [`__init__.py`](__init__.py) 只负责稳定导出 `create_app`。原来的根级 `api.py` 和 `api_models.py` 不再保留，今后新增或修改接口时只需要检查一个实现文件，同时仍通过清晰的代码分区保留可维护性。
 
-`api.py` 只负责 HTTP 边界，不实现 Agent 推理、记忆算法或 SQLite 业务逻辑。核心调用方向保持为：
+`app.py` 只负责 HTTP 边界，不实现 Agent 推理、记忆算法或 SQLite 业务逻辑。核心调用方向保持为：
 
 ```text
 FastAPI route
@@ -50,7 +50,7 @@ FastAPI route
 | `tools` | `/api/tools...` | 工具目录和受确认保护的调试执行 |
 | `traces` | `/api/traces` | 推理运行追踪 |
 
-详细字段、状态码和 curl 示例见项目级 [`docs/API接口文档.md`](../docs/API接口文档.md)。服务运行后可访问 `/docs` 查看 Swagger UI，访问 `/openapi.json` 获取机器可读契约。
+详细字段、状态码和 curl 示例见项目级 [`docs/API接口文档.md`](../../docs/API接口文档.md)。服务运行后可访问 `/docs` 查看 Swagger UI，访问 `/openapi.json` 获取机器可读契约。
 
 ## 5. 并发与错误边界
 
@@ -65,7 +65,7 @@ FastAPI route
 
 ## 6. 修改 API 的检查清单
 
-1. 在 `api.py` 中新增或修改 Pydantic 模型。
+1. 在 `app.py` 中新增或修改 Pydantic 模型。
 2. 为路由声明 `response_model`、tag、summary 和输入边界。
 3. 更新 `docs/API接口文档.md` 与前端 `src/api.ts`。
 4. 在 `tests/test_core.py` 增加成功、校验失败和权限边界测试。

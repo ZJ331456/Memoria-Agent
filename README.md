@@ -42,6 +42,8 @@ cd frontend && npm install && npm run build && cd ..
 
 API 使用、错误协议、请求示例和全部端点见 [API接口文档.md](docs/API接口文档.md)。服务启动后也可以直接访问 `http://127.0.0.1:2237/docs` 使用 Swagger UI。
 
+API 代码集中在 `memoria/api/app.py`，并通过 `memoria/api/__init__.py` 保持稳定导入；模块维护说明见 [memoria/api/README.md](memoria/api/README.md)。可直接用于 LaTeX 简历的项目描述见 [简历项目经历.md](docs/简历项目经历.md)。
+
 本轮九项核心优化的实现与验收说明见 [核心优化第五轮：九项落地说明](docs/核心优化审计-第五轮-九项落地.md)。
 
 后续九项生产化增强见 [核心优化第六轮：九项生产化增强](docs/核心优化审计-第六轮-生产化九项.md)。浏览器回归可运行 `cd frontend && npm run test:e2e`。
