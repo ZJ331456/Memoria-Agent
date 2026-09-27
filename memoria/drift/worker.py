@@ -4,7 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -43,6 +43,7 @@ class DriftWorker:
 
     def status(self) -> dict[str, Any]:
         enabled = bool(self.settings.drift_enabled)
+        self.store.expire_stale_drift_runs(older_than_seconds=max(900, self.settings.drift_interval_seconds))
         last = self.store.latest_drift_run()
         today = self.store.drift_runs_today(self.timezone)
         return {
@@ -60,7 +61,9 @@ class DriftWorker:
             "allow_write_tools": list(self.settings.drift_allow_write_tools),
             "timezone": str(self.timezone),
             "last_run": last,
-            "idle_seconds": self.store.seconds_since_last_user_message(),
+            "idle_seconds": self.store.seconds_since_last_user_message(
+                exclude_session_titles=(DRIFT_SESSION_TITLE,),
+            ),
             "session_id": self._find_session_id(),
         }
 
@@ -88,25 +91,29 @@ class DriftWorker:
             return {"skipped": True, "reason": "disabled"}
         if self._running:
             return {"skipped": True, "reason": "already_running"}
-        if self.is_busy() and not force:
+        # Never overlap a live user turn, even on forced runs.
+        if self.is_busy():
             return {"skipped": True, "reason": "user_turn_active"}
+        self.store.expire_stale_drift_runs(older_than_seconds=max(900, self.settings.drift_interval_seconds))
         now_local = datetime.now(self.timezone)
         if not force and now_local.hour in set(self.settings.drift_quiet_hours):
             return {"skipped": True, "reason": f"quiet_hour:{now_local.hour}"}
-        idle = self.store.seconds_since_last_user_message()
+        idle = self.store.seconds_since_last_user_message(exclude_session_titles=(DRIFT_SESSION_TITLE,))
         if not force and idle is not None and idle < self.settings.drift_min_idle_seconds:
             return {"skipped": True, "reason": "not_idle", "idle_seconds": idle}
         last = self.store.latest_drift_run()
-        if not force and last and last.get("status") in {"completed", "failed", "running"}:
+        if not force and last and last.get("status") in {"completed", "failed"}:
             try:
                 last_at = datetime.fromisoformat(str(last["created_at"]))
                 if last_at.tzinfo is None:
-                    last_at = last_at.replace(tzinfo=self.timezone)
+                    last_at = last_at.replace(tzinfo=timezone.utc)
                 elapsed = (datetime.now(self.timezone) - last_at.astimezone(self.timezone)).total_seconds()
                 if elapsed < self.settings.drift_interval_seconds:
                     return {"skipped": True, "reason": "cooldown", "elapsed_seconds": int(elapsed)}
             except ValueError:
                 pass
+        if last and last.get("status") == "running":
+            return {"skipped": True, "reason": "previous_still_running"}
         if not force and self.store.drift_runs_today(self.timezone) >= self.settings.drift_daily_budget:
             return {"skipped": True, "reason": "daily_budget"}
         skill_name = self._pick_skill()
@@ -156,9 +163,12 @@ class DriftWorker:
             if record:
                 skill_body = record.body
         prompt = self._build_prompt(skill_name, skill_body)
+        # Hard-block destructive tools even if misconfigured in allow_write_tools.
+        blocked = {"forget_memory"}
+        allowed = {name for name in self.settings.drift_allow_write_tools if name not in blocked}
         authorization = ToolAuthorization(
-            set(self.settings.drift_allow_write_tools),
-            reason=f"drift allowlist:{','.join(self.settings.drift_allow_write_tools) or 'none'}",
+            allowed,
+            reason=f"drift allowlist:{','.join(sorted(allowed)) or 'none'}",
         )
         try:
             message, _created, trace = await self.runtime.run(

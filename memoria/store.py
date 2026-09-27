@@ -443,11 +443,22 @@ class Store:
             "drift_runs": drift_runs,
         }
 
-    def seconds_since_last_user_message(self) -> float | None:
+    def seconds_since_last_user_message(self, *, exclude_session_titles: tuple[str, ...] = ()) -> float | None:
+        """Idle since last human user message. Drift session prompts are excluded by title."""
         with self.lock:
-            row = self.db.execute(
-                "SELECT created_at FROM messages WHERE role='user' ORDER BY created_at DESC LIMIT 1"
-            ).fetchone()
+            if exclude_session_titles:
+                placeholders = ",".join("?" for _ in exclude_session_titles)
+                row = self.db.execute(
+                    f"""SELECT m.created_at FROM messages m
+                    JOIN sessions s ON s.id=m.session_id
+                    WHERE m.role='user' AND s.title NOT IN ({placeholders})
+                    ORDER BY m.created_at DESC LIMIT 1""",
+                    exclude_session_titles,
+                ).fetchone()
+            else:
+                row = self.db.execute(
+                    "SELECT created_at FROM messages WHERE role='user' ORDER BY created_at DESC LIMIT 1"
+                ).fetchone()
         if not row:
             return None
         try:
@@ -525,16 +536,28 @@ class Store:
         return rows[0] if rows else None
 
     def drift_runs_today(self, tz: Any) -> int:
-        from datetime import datetime as dt
-
-        start = dt.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        """Count today's runs in the given local timezone (compare in UTC)."""
+        start_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_utc = start_local.astimezone(timezone.utc).isoformat()
         with self.lock:
             return int(
                 self.db.execute(
-                    "SELECT COUNT(*) FROM drift_runs WHERE created_at >= ? AND status != 'cancelled'",
-                    (start,),
+                    "SELECT COUNT(*) FROM drift_runs WHERE created_at >= ? AND status NOT IN ('cancelled')",
+                    (start_utc,),
                 ).fetchone()[0]
             )
+
+    def expire_stale_drift_runs(self, *, older_than_seconds: int = 1800) -> int:
+        """Mark abandoned running drifts as failed so cooldown cannot stick forever."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(60, older_than_seconds))).isoformat()
+        with self.lock:
+            cursor = self.db.execute(
+                """UPDATE drift_runs SET status='failed', error=COALESCE(NULLIF(error,''),'stale running expired'),
+                finished_at=? WHERE status='running' AND created_at < ?""",
+                (now(), cutoff),
+            )
+            self.db.commit()
+        return int(cursor.rowcount)
 
     def observability_summary(self) -> dict[str, Any]:
         with self.lock:

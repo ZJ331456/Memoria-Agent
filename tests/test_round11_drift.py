@@ -10,17 +10,33 @@ from memoria.store import Store
 
 
 def test_drift_store_and_skip_reasons(tmp_path: Path):
+    from zoneinfo import ZoneInfo
+
     store = Store(tmp_path / "drift.db")
     assert store.seconds_since_last_user_message() is None
     session = store.create_session("测试")
     store.add_message(session["id"], "user", "你好")
     assert store.seconds_since_last_user_message() is not None
+    drift = store.create_session("〔Drift〕空闲整理")
+    store.add_message(drift["id"], "user", "[Drift] prompt")
+    assert store.seconds_since_last_user_message(exclude_session_titles=("〔Drift〕空闲整理",)) is not None
+    # Drift-only messages must not reset idle when excluded.
+    store2 = Store(tmp_path / "drift2.db")
+    only_drift = store2.create_session("〔Drift〕空闲整理")
+    store2.add_message(only_drift["id"], "user", "[Drift] alone")
+    assert store2.seconds_since_last_user_message(exclude_session_titles=("〔Drift〕空闲整理",)) is None
     run = store.create_drift_run(run_id="r1", session_id=session["id"], skill="drift-digest", trigger="test")
     assert run["status"] == "running"
     finished = store.finish_drift_run("r1", status="completed", summary="ok", steps=2, trace_id="t1")
     assert finished["status"] == "completed" and finished["summary"] == "ok"
     assert store.latest_drift_run()["id"] == "r1"
     assert store.overview()["drift_runs"] == 1
+    assert store.drift_runs_today(ZoneInfo("Asia/Shanghai")) >= 1
+    stale = store.create_drift_run(run_id="stale", session_id=session["id"], skill="drift-digest", trigger="test")
+    store.db.execute("UPDATE drift_runs SET created_at='2000-01-01T00:00:00+00:00' WHERE id=?", (stale["id"],))
+    store.db.commit()
+    assert store.expire_stale_drift_runs(older_than_seconds=60) >= 1
+    assert store.db.execute("SELECT status FROM drift_runs WHERE id='stale'").fetchone()[0] == "failed"
 
 
 def test_drift_api_status_and_manual_skip(tmp_path: Path):
