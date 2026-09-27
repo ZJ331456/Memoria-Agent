@@ -41,6 +41,8 @@ cd frontend && npm install && npm run build && cd ..
 - Prompt Context Frame、会话压缩摘要、取消中断标记、Markdown 记忆导出
 - Markdown 真双层：`MEMORY.md` / `SELF.md` / `PENDING.md` 运行时读写
 - 模型热配置与 Setup 向导（页面配置、连通测试、密钥不回显）
+- Tool Search：`always_on` 直连 + `tool_search` / `tool_call` 按需暴露 schema
+- MCP 客户端：stdio JSON-RPC 发现/调用外部工具（`data/mcp_servers.json`）
 
 详细架构、模块边界、接口和后续阶段见 [系统架构与实现说明.md](docs/系统架构与实现说明.md)。
 
@@ -56,4 +58,6 @@ API 代码集中在 `memoria/api/app.py`，并通过 `memoria/api/__init__.py` �
 
 第八轮轻量 Skills（`skills/*/SKILL.md` 发现、触发注入、`load_skill`/`http_get`）见 [核心优化第八轮：轻量Skills](docs/核心优化审计-第八轮-轻量Skills.md) 与 [skills/README.md](skills/README.md)。
 
-第九轮 Markdown 真双层与模型 Setup 向导见 [核心优化第九轮：Markdown双层与Setup](docs/核心优化审计-第九轮-Markdown双层与Setup.md)。浏览器回归可运行 `cd frontend && npm run test:e2e`。
+第九轮 Markdown 真双层与模型 Setup 向导见 [核心优化第九轮：Markdown双层与Setup](docs/核心优化审计-第九轮-Markdown双层与Setup.md)。
+
+第十轮 Tool Search + MCP 客户端见 [核心优化第十轮：ToolSearch与MCP](docs/核心优化审计-第十轮-ToolSearch与MCP.md)。复制 `mcp_servers.example.json` 为 `data/mcp_servers.json` 即可接入内置 demo server。浏览器回归可运行 `cd frontend && npm run test:e2e`。

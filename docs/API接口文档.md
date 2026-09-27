@@ -2,7 +2,7 @@
 
 ## 1. 文档范围
 
-本文描述 Memoria Agent `0.6.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
+本文描述 Memoria Agent `0.8.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试、Tool Search、MCP 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
 
 - 默认地址：`http://127.0.0.1:2237`
 - API 前缀：`/api`
@@ -48,12 +48,12 @@
 最小存活检查，不访问模型。
 
 ```json
-{"status":"ok","version":"0.6.0"}
+{"status":"ok","version":"0.8.0"}
 ```
 
 ### `GET /api/overview`
 
-返回 Dashboard 所需聚合数据：会话、消息、记忆、trace 数量；脱敏模型配置；工具目录；生命周期模块。模型配置只返回 `configured`，永不返回 API Key。
+返回 Dashboard 所需聚合数据：会话、消息、记忆、trace 数量；脱敏模型配置；工具目录；Tool Search / MCP 状态；生命周期模块。模型配置只返回 `configured`，永不返回 API Key。
 
 ### `GET /metrics`
 
@@ -199,7 +199,19 @@ embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余�
 
 ### `GET /api/tools`
 
-返回工具名称、说明和风险级别。
+返回工具名称、说明、风险级别、owner、always_on 与 search_hint。
+
+### `GET /api/tools/search`
+
+返回 Tool Search 状态：是否启用、直连工具、可搜索工具与分组。
+
+### `POST /api/tools/search`
+
+调试执行搜索：
+
+```json
+{"query":"记忆","top_k":5}
+```
 
 ### `POST /api/tools/{tool_name}/execute`
 
@@ -213,6 +225,16 @@ embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余�
 ```
 
 只读工具可以直接执行。`write` 工具必须明确设置 `confirm_write=true`，否则返回 409。前端工具实验台默认只展示只读工具。
+
+## 7.1 MCP API
+
+### `GET /api/mcp`
+
+返回 MCP 开关、配置路径、各 server 连接状态与已注册工具名。
+
+### `POST /api/mcp/reload`
+
+重新读取 `mcp_servers.json`、断开旧连接并重新注册工具。
 
 ## 8. Trace API
 

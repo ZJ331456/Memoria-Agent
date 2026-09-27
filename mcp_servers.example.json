@@ -1,0 +1,13 @@
+{
+  "servers": [
+    {
+      "name": "demo",
+      "command": ["python", "-m", "memoria.mcp.demo_server"],
+      "enabled": true,
+      "risk": "read-only",
+      "allowed_tools": [],
+      "timeout_seconds": 15,
+      "env": {}
+    }
+  ]
+}

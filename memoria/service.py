@@ -7,10 +7,11 @@ from .config import Settings
 from .llm import LLMClient
 from .store import Store
 from .memory import EmbeddingClient, MemoryEngine, MemoryJobWorker, MarkdownMemoryLayer
+from .mcp import McpHost
 from .models_config import public_models, save_model_overrides, test_model_slot
 from .runtime import AgentRuntime
 from .skills import SkillCatalog
-from .tools import build_registry
+from .tools import ToolPresentation, build_registry
 
 
 class AgentService:
@@ -37,13 +38,28 @@ class AgentService:
             self.skills,
             http_allowed_hosts=settings.http_allowed_hosts,
         )
+        self.tool_presentation = ToolPresentation(tools, enabled=settings.tool_search_enabled)
+        self.mcp = McpHost(tools, settings.mcp_config_file, enabled=settings.mcp_enabled)
         self.runtime = AgentRuntime(
-            settings, store, llm, memory, tools, skills=self.skills, markdown=self.markdown,
+            settings,
+            store,
+            llm,
+            memory,
+            tools,
+            skills=self.skills,
+            markdown=self.markdown,
+            tool_presentation=self.tool_presentation,
         )
         self.memory_worker = MemoryJobWorker(
             store, llm, memory, lease_seconds=settings.memory_job_lease_seconds,
             max_retries=settings.memory_job_max_retries, backoff_seconds=settings.memory_job_backoff_seconds,
         )
+
+    async def start_integrations(self) -> None:
+        await self.mcp.start()
+
+    async def stop_integrations(self) -> None:
+        await self.mcp.stop()
 
     async def chat(self, session_id: str, content: str) -> tuple[dict, list[dict]]:
         message, memories, _ = await self.chat_with_trace(session_id, content)

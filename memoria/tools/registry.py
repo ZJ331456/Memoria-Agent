@@ -19,6 +19,9 @@ class Tool:
     risk: str = "read-only"
     timeout_seconds: float | None = None
     max_output_chars: int = 12000
+    owner: str = "builtin"
+    search_hint: str = ""
+    always_on: bool = True
 
     def schema(self) -> dict[str, Any]:
         return {"type": "function", "function": {"name": self.name, "description": self.description, "parameters": self.parameters}}
@@ -42,14 +45,39 @@ class ToolRegistry:
         if tool.name in self._tools: raise ValueError(f"工具重复注册: {tool.name}")
         self._tools[tool.name] = tool
 
+    def unregister(self, name: str) -> bool:
+        return self._tools.pop(name, None) is not None
+
+    def unregister_owner(self, owner: str) -> list[str]:
+        removed = [name for name, tool in self._tools.items() if tool.owner == owner]
+        for name in removed:
+            del self._tools[name]
+        return removed
+
+    def get(self, name: str) -> Tool | None:
+        return self._tools.get(name)
+
+    def all(self) -> list[Tool]:
+        return list(self._tools.values())
+
     def register_hook(self, hook: Hook) -> None:
         self._hooks.append(hook)
 
     def schemas(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tools.values()]
 
-    def catalog(self) -> list[dict[str, str]]:
-        return [{"name": t.name, "description": t.description, "risk": t.risk} for t in self._tools.values()]
+    def catalog(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "risk": t.risk,
+                "owner": t.owner,
+                "always_on": t.always_on,
+                "search_hint": t.search_hint,
+            }
+            for t in self._tools.values()
+        ]
 
     async def execute(self, name: str, arguments: dict[str, Any], allow_write: bool = False, allowed_write_tools: set[str] | None = None) -> ToolResult:
         import time

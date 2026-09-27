@@ -69,6 +69,9 @@ class Settings:
     skills_directory: Path
     skills_max_inject: int
     http_allowed_hosts: tuple[str, ...]
+    tool_search_enabled: bool
+    mcp_enabled: bool
+    mcp_config_file: Path
     markdown_enabled: bool
     markdown_directory: Path
     host: str
@@ -94,6 +97,7 @@ class Settings:
         observability = data.get("observability", {})
         storage = data.get("storage", {})
         tools_section = agent.get("tools", {})
+        mcp_section = agent.get("mcp", {})
 
         def model(section: dict[str, Any]) -> ModelConfig:
             return ModelConfig(
@@ -118,6 +122,12 @@ class Settings:
         markdown_dir = Path(str(memory_section.get("markdown", {}).get("directory", "data/markdown")))
         if not markdown_dir.is_absolute():
             markdown_dir = root / markdown_dir
+        mcp_config = Path(str(mcp_section.get("config_file", "data/mcp_servers.json")))
+        if not mcp_config.is_absolute():
+            mcp_config = root / mcp_config
+        tool_search_enabled = bool(
+            tools_section.get("search_enabled", tools_section.get("tool_search_enabled", True))
+        )
         settings = cls(
             root=root,
             database=db,
@@ -145,6 +155,9 @@ class Settings:
             skills_directory=skills_dir,
             skills_max_inject=max(0, int(skills_section.get("max_inject", 2))),
             http_allowed_hosts=_string_tuple(tools_section.get("http_allowed_hosts"), default_http_hosts),
+            tool_search_enabled=tool_search_enabled,
+            mcp_enabled=bool(mcp_section.get("enabled", True)),
+            mcp_config_file=mcp_config,
             markdown_enabled=bool(memory_section.get("markdown", {}).get("enabled", True)),
             markdown_directory=markdown_dir,
             host=str(server.get("host", "127.0.0.1")),
@@ -163,6 +176,8 @@ class Settings:
             "vector_backend": self.vector_backend, "auth_enabled": bool(self.api_token),
             "rate_limit_per_minute": self.rate_limit_per_minute, "config_source": str(self.source),
             "skills_enabled": self.skills_enabled, "skills_directory": str(self.skills_directory),
+            "tool_search_enabled": self.tool_search_enabled,
+            "mcp_enabled": self.mcp_enabled, "mcp_config_file": str(self.mcp_config_file),
             "markdown_enabled": self.markdown_enabled, "markdown_directory": str(self.markdown_directory),
             "setup_needed": not bool(self.main.api_key and self.main.model and self.main.base_url),
         }

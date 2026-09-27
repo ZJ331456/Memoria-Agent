@@ -37,8 +37,15 @@ directory = "skills"
 max_inject = 2
 
 [agent.tools]
+# 启用后，非 always_on 工具经 tool_search + tool_call 按需暴露，避免撑爆上下文。
+search_enabled = true
 # http_get 仅允许这些主机，供 weather / summarize 等技能使用。
 http_allowed_hosts = ["wttr.in", "api.open-meteo.com", "open-meteo.com"]
+
+[agent.mcp]
+# 从 JSON 加载外部 MCP server；示例见 mcp_servers.example.json。
+enabled = true
+config_file = "data/mcp_servers.json"
 
 [memory]
 enabled = true

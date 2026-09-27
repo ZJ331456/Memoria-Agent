@@ -181,7 +181,13 @@ class ToolExecuteResponse(BaseModel):
     elapsed_ms: int
 
 
-VERSION = "0.7.0"
+class ToolSearchBody(StrictModel):
+    query: str = Field(min_length=1, max_length=200)
+    top_k: int = Field(default=5, ge=1, le=10)
+    allowed_risk: list[Literal["read-only", "write", "external-side-effect"]] | None = None
+
+
+VERSION = "0.8.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
     {"name": "setup", "description": "模型热配置、连通性测试与 Setup 向导。"},
@@ -189,7 +195,8 @@ TAGS = [
     {"name": "agent", "description": "执行完整 Agent turn，包括记忆召回、工具循环和 trace。"},
     {"name": "memories", "description": "长期记忆查询、创建、编辑和删除。"},
     {"name": "markdown", "description": "MEMORY/SELF/PENDING Markdown 双层记忆。"},
-    {"name": "tools", "description": "工具目录以及受风险级别保护的调试执行。"},
+    {"name": "tools", "description": "工具目录、Tool Search 与受风险级别保护的调试执行。"},
+    {"name": "mcp", "description": "外部 MCP server 连接状态与热重载。"},
     {"name": "skills", "description": "轻量 SKILL.md 目录发现、读取与热重载。"},
     {"name": "traces", "description": "每轮推理的耗时、召回与工具调用诊断。"},
 ]
@@ -226,13 +233,17 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        await service.start_integrations()
         memory_task = asyncio.create_task(service.memory_worker.run(), name="memoria-memory-worker")
-        yield
-        memory_task.cancel()
-        with suppress(asyncio.CancelledError): await memory_task
-        for task in active_turns.values(): task.cancel()
-        if active_turns: await asyncio.gather(*active_turns.values(), return_exceptions=True)
-        store.close()
+        try:
+            yield
+        finally:
+            memory_task.cancel()
+            with suppress(asyncio.CancelledError): await memory_task
+            for task in active_turns.values(): task.cancel()
+            if active_turns: await asyncio.gather(*active_turns.values(), return_exceptions=True)
+            await service.stop_integrations()
+            store.close()
 
     app = FastAPI(
         title="Memoria Agent API", version=VERSION,
@@ -292,6 +303,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "models": settings.public_dict(),
             "vector_index": store.vector_index_status,
             "tools": service.runtime.tools.catalog(),
+            "tool_search": service.tool_presentation.public_status(),
+            "mcp": service.mcp.status(),
             "pipeline": service.runtime.pipeline.inspect(),
             "skills": skills,
             "markdown": service.markdown.status(),
@@ -349,8 +362,26 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {"name": "MEMORY", "content": content, "status": service.markdown.status()}
 
     @app.get("/api/tools", tags=["tools"], summary="列出模型可调用工具")
-    def tools() -> list[dict[str, str]]:
+    def tools() -> list[dict[str, Any]]:
         return service.runtime.tools.catalog()
+
+    @app.get("/api/tools/search", tags=["tools"], summary="Tool Search 状态与目录")
+    def tool_search_status():
+        return service.tool_presentation.public_status()
+
+    @app.post("/api/tools/search", tags=["tools"], summary="调试执行 tool_search")
+    async def tool_search_run(body: ToolSearchBody):
+        return service.tool_presentation.search(
+            body.query, top_k=body.top_k, allowed_risk=body.allowed_risk,
+        )
+
+    @app.get("/api/mcp", tags=["mcp"], summary="MCP server 连接状态")
+    def mcp_status():
+        return service.mcp.status()
+
+    @app.post("/api/mcp/reload", tags=["mcp"], summary="重新加载并连接 MCP servers")
+    async def mcp_reload():
+        return {"servers": [item.public_dict() for item in await service.mcp.reload()], "status": service.mcp.status()}
 
     @app.get("/api/skills", tags=["skills"], summary="列出已发现的轻量技能")
     def list_skills():

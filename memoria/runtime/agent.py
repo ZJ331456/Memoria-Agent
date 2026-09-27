@@ -14,7 +14,7 @@ from ..prompting import ContextBudget, PromptAssembler, PromptSection
 from ..memory.layer import MarkdownMemoryLayer
 from ..skills import SkillCatalog
 from ..store import Store
-from ..tools import ToolPolicy, ToolRegistry
+from ..tools import ToolPolicy, ToolPresentation, ToolRegistry
 from ..tools.loop_guard import ToolLoopGuard
 from .compaction import SessionCompactor
 
@@ -31,6 +31,7 @@ class AgentRuntime:
         event_bus: EventBus | None = None,
         skills: SkillCatalog | None = None,
         markdown: MarkdownMemoryLayer | None = None,
+        tool_presentation: ToolPresentation | None = None,
     ):
         self.settings = settings
         self.store = store
@@ -39,6 +40,7 @@ class AgentRuntime:
         self.tools = tools
         self.skills = skills
         self.markdown = markdown
+        self.tool_presentation = tool_presentation or ToolPresentation(tools, enabled=False)
         self.pipeline = pipeline or Pipeline()
         self.event_bus = event_bus or EventBus()
         self.context_budget = ContextBudget(settings.context_char_budget)
@@ -118,6 +120,10 @@ class AgentRuntime:
                         ],
                         "catalog_size": len(self.skills.list()),
                     }
+                tool_catalog = self.tool_presentation.catalog_prompt()
+                if tool_catalog:
+                    extra_sections.append(PromptSection("Tool Search", tool_catalog, 35))
+                context.metadata["tool_search"] = self.tool_presentation.public_status()
 
                 assembled = self.prompt_assembler.assemble(
                     self.settings.system_prompt,
@@ -163,15 +169,17 @@ class AgentRuntime:
                             async def stream_delta(text: str):
                                 await on_event({"type": "delta", "content": text})
 
-                            result = await self.llm.chat_stream(context.messages, tools=self.tools.schemas(), on_delta=stream_delta)
+                            result = await self.llm.chat_stream(
+                                context.messages, tools=self.tool_presentation.schemas(), on_delta=stream_delta
+                            )
                         else:
-                            result = await self.llm.chat(context.messages, tools=self.tools.schemas())
+                            result = await self.llm.chat(context.messages, tools=self.tool_presentation.schemas())
                     except ContextLengthError:
                         emergency = self.context_budget.emergency(context.messages)
                         context.messages = emergency.messages
                         context.metadata["context_budget"]["emergency_retry"] = True
                         context.metadata["context_budget"]["final_chars"] = emergency.final_chars
-                        result = await self.llm.chat(context.messages, tools=self.tools.schemas())
+                        result = await self.llm.chat(context.messages, tools=self.tool_presentation.schemas())
                     self._record_llm(context, result)
                     if not result.tool_calls:
                         context.response = result.content or "我暂时没有生成有效回复，请再试一次。"
@@ -278,21 +286,37 @@ class AgentRuntime:
         on_event: Callable[[dict[str, Any]], Awaitable[None]] | None,
     ) -> list[dict[str, Any]]:
         async def run_one(call: dict[str, Any]) -> dict[str, Any]:
-            tool_result = await self.tools.execute(
-                call["name"],
-                call["arguments"],
-                allowed_write_tools=allowed_write_tools,
-            )
-            record = {
-                "step": step,
-                "name": call["name"],
-                "arguments": call["arguments"],
-                "ok": tool_result.ok,
-                "elapsed_ms": tool_result.elapsed_ms,
-                "preview": tool_result.content[:300],
-                "content": tool_result.content,
-                "parallel": len(tool_calls) > 1,
-            }
+            decoded = self.tool_presentation.decode(call["name"], call["arguments"])
+            if isinstance(decoded, str):
+                record = {
+                    "step": step,
+                    "name": call["name"],
+                    "arguments": call["arguments"],
+                    "ok": False,
+                    "elapsed_ms": 0,
+                    "preview": decoded[:300],
+                    "content": decoded,
+                    "parallel": len(tool_calls) > 1,
+                }
+            else:
+                tool_name, tool_args = decoded
+                tool_result = await self.tools.execute(
+                    tool_name,
+                    tool_args,
+                    allowed_write_tools=allowed_write_tools,
+                )
+                record = {
+                    "step": step,
+                    "name": tool_name,
+                    "arguments": tool_args,
+                    "ok": tool_result.ok,
+                    "elapsed_ms": tool_result.elapsed_ms,
+                    "preview": tool_result.content[:300],
+                    "content": tool_result.content,
+                    "parallel": len(tool_calls) > 1,
+                }
+                if call["name"] == "tool_call":
+                    record["via"] = "tool_call"
             if on_event:
                 await on_event({"type": "tool", "tool": {key: value for key, value in record.items() if key != "content"}})
             return record

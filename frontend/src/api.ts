@@ -6,12 +6,15 @@ export type MemoryReindex={enabled:boolean;indexed:number;remaining:number}
 export type MemoryWrite={action:'created'|'reinforced'|'superseded';memory:Memory;previous_id:string|null;reason:string}
 export type MemoryJob={id:string;source_ref:string;status:'pending'|'running'|'retry'|'completed'|'failed';attempts:number;error:string|null;available_at:string|null;lease_owner:string|null;lease_expires_at:string|null;created_at:string;updated_at:string}
 export type MemoryUndo={affected_ids:string[];restored_ids:string[]}
-export type Tool={name:string;description:string;risk:'read-only'|'write'|string}
+export type Tool={name:string;description:string;risk:'read-only'|'write'|string;owner?:string;always_on?:boolean;search_hint?:string}
+export type ToolSearchStatus={enabled:boolean;direct_tools:string[];searchable_tools:string[];groups:Array<{owner:string;tools:string[]}>}
+export type McpServerStatus={name:string;enabled:boolean;connected:boolean;tools:string[];error:string;command:string[];risk:string}
+export type McpStatus={enabled:boolean;config_path:string;servers:McpServerStatus[];tool_count:number}
 export type Trace={id:string;session_id:string;status:string;steps:number;duration_ms:number;memories:Memory[];tools:Array<{name:string;ok:boolean;elapsed_ms:number;preview:string;arguments:Record<string,unknown>}>;metadata:Record<string,any>;error:string|null;created_at:string}
 export type ModelSlot={model:string;base_url:string;configured:boolean;api_key_set?:boolean}
 export type SetupStatus={main:ModelSlot;fast:ModelSlot;embedding:ModelSlot;setup_needed:boolean;override_path?:string}
 export type MarkdownStatus={enabled:boolean;directory?:string;files?:Record<string,number>;pending_open?:number}
-export type Overview={sessions:number;messages:number;memories:number;memories_superseded:number;traces:number;memory_jobs_pending:number;memory_jobs_failed:number;models:Record<string,any>;vector_index?:{enabled:boolean;backend:string;dimension:number|null;error:string};tools:Tool[];pipeline:Record<string,string[]>;markdown?:MarkdownStatus;setup?:SetupStatus}
+export type Overview={sessions:number;messages:number;memories:number;memories_superseded:number;traces:number;memory_jobs_pending:number;memory_jobs_failed:number;models:Record<string,any>;vector_index?:{enabled:boolean;backend:string;dimension:number|null;error:string};tools:Tool[];tool_search?:ToolSearchStatus;mcp?:McpStatus;pipeline:Record<string,string[]>;markdown?:MarkdownStatus;setup?:SetupStatus}
 export class ApiError extends Error{constructor(message:string,public code:string,public requestId:string,public status:number){super(message)}}
 const apiToken=import.meta.env.VITE_MEMORIA_API_TOKEN as string|undefined
 const requestHeaders=()=>({'Content-Type':'application/json','X-Request-ID':crypto.randomUUID(),...(apiToken?{Authorization:`Bearer ${apiToken}`}:{})})
@@ -30,6 +33,10 @@ export const api={
  undoMemories:(sourceRefs:string[],dryRun=false)=>call<MemoryUndo>('/api/memories/undo',{method:'POST',body:JSON.stringify({source_refs:sourceRefs,dry_run:dryRun})}),
  updateMemory:(id:string,data:Partial<Pick<Memory,'content'|'kind'|'importance'>>)=>call<Memory>(`/api/memories/${id}`,{method:'PATCH',body:JSON.stringify(data)}), deleteMemory:(id:string)=>call<void>(`/api/memories/${id}`,{method:'DELETE'}),
  traces:(sessionId='')=>call<Trace[]>(`/api/traces?session_id=${encodeURIComponent(sessionId)}`), tools:()=>call<Tool[]>('/api/tools'),
+ toolSearchStatus:()=>call<ToolSearchStatus>('/api/tools/search'),
+ searchTools:(query:string,topK=5)=>call<{matched_groups:any[];tip:string}>('/api/tools/search',{method:'POST',body:JSON.stringify({query,top_k:topK})}),
+ mcpStatus:()=>call<McpStatus>('/api/mcp'),
+ reloadMcp:()=>call<{status:McpStatus}>('/api/mcp/reload',{method:'POST'}),
  executeTool:(name:string,arguments_:Record<string,unknown>,confirmWrite=false)=>call<{name:string;ok:boolean;content:string;elapsed_ms:number}>(`/api/tools/${name}/execute`,{method:'POST',body:JSON.stringify({arguments:arguments_,confirm_write:confirmWrite})}),
  setupStatus:()=>call<SetupStatus>('/api/setup/status'),
  getModels:()=>call<SetupStatus>('/api/settings/models'),
