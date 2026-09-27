@@ -1,11 +1,81 @@
 {
   "servers": [
     {
-      "name": "demo",
-      "command": ["python", "-m", "memoria.mcp.demo_server"],
+      "name": "filesystem",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/ABS/PATH/TO/Memoria-Agent/data/mcp_workspace"
+      ],
+      "enabled": true,
+      "risk": "write",
+      "timeout_seconds": 30,
+      "env": {}
+    },
+    {
+      "name": "fetch",
+      "command": ["uvx", "mcp-server-fetch"],
       "enabled": true,
       "risk": "read-only",
-      "allowed_tools": [],
+      "timeout_seconds": 45,
+      "env": {}
+    },
+    {
+      "name": "time",
+      "command": ["uvx", "mcp-server-time"],
+      "enabled": true,
+      "risk": "read-only",
+      "timeout_seconds": 20,
+      "env": {}
+    },
+    {
+      "name": "thinking",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "enabled": true,
+      "risk": "read-only",
+      "timeout_seconds": 30,
+      "env": {}
+    },
+    {
+      "name": "git",
+      "command": [
+        "uvx",
+        "mcp-server-git",
+        "--repository",
+        "/ABS/PATH/TO/Memoria-Agent"
+      ],
+      "enabled": true,
+      "risk": "read-only",
+      "allowed_tools": [
+        "git_status",
+        "git_diff_unstaged",
+        "git_diff_staged",
+        "git_diff",
+        "git_log",
+        "git_show",
+        "git_branch"
+      ],
+      "timeout_seconds": 30,
+      "env": {}
+    },
+    {
+      "name": "memory",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-memory"],
+      "enabled": false,
+      "risk": "write",
+      "timeout_seconds": 30,
+      "env": {}
+    },
+    {
+      "name": "demo",
+      "command": ["python", "-m", "memoria.mcp.demo_server"],
+      "enabled": false,
+      "risk": "read-only",
       "timeout_seconds": 15,
       "env": {}
     }

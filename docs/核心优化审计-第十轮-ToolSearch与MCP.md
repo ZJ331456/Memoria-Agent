@@ -35,9 +35,12 @@ python -m pytest -q
 cd frontend && npm run build
 ```
 
-复制示例配置启用 demo MCP：
+复制示例配置启用 MCP：
 
 ```bash
 cp mcp_servers.example.json data/mcp_servers.json
-# 将 demo.enabled 设为 true 后重启或调用 POST /api/mcp/reload
+# 把 filesystem / git 的路径改成绝对路径；需要 uvx（Astral uv）和 npx
+# 重启服务或 POST /api/mcp/reload
 ```
+
+本机已验证的免 API Key 官方 server：`filesystem`、`fetch`、`time`、`sequential-thinking`、`git`（只读子集）。图谱记忆 `@modelcontextprotocol/server-memory` 在示例里默认关闭，避免与 Memoria 自有记忆混淆。

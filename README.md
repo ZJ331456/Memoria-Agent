@@ -60,4 +60,16 @@ API 代码集中在 `memoria/api/app.py`，并通过 `memoria/api/__init__.py` �
 
 第九轮 Markdown 真双层与模型 Setup 向导见 [核心优化第九轮：Markdown双层与Setup](docs/核心优化审计-第九轮-Markdown双层与Setup.md)。
 
-第十轮 Tool Search + MCP 客户端见 [核心优化第十轮：ToolSearch与MCP](docs/核心优化审计-第十轮-ToolSearch与MCP.md)。复制 `mcp_servers.example.json` 为 `data/mcp_servers.json` 即可接入内置 demo server。浏览器回归可运行 `cd frontend && npm run test:e2e`。
+第十轮 Tool Search + MCP 客户端见 [核心优化第十轮：ToolSearch与MCP](docs/核心优化审计-第十轮-ToolSearch与MCP.md)。
+
+推荐 MCP（官方参考实现，已在本机验证）：复制 `mcp_servers.example.json` → `data/mcp_servers.json`，把路径改成绝对路径后重启或 `POST /api/mcp/reload`。
+
+| Server | 来源 | 用途 |
+|---|---|---|
+| filesystem | `@modelcontextprotocol/server-filesystem` | 沙箱目录读写 |
+| fetch | `uvx mcp-server-fetch` | 抓取网页转文本 |
+| time | `uvx mcp-server-time` | 时区时间 |
+| thinking | `@modelcontextprotocol/server-sequential-thinking` | 分步推理 |
+| git | `uvx mcp-server-git` | 只读 git 查询（示例已限制工具） |
+
+依赖：Node/`npx`，以及 [uv](https://docs.astral.sh/uv/) 的 `uvx`。浏览器回归可运行 `cd frontend && npm run test:e2e`。
