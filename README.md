@@ -1,78 +1,132 @@
 # Memoria Agent
 
-一个可运行的“对话 + 长期记忆 + 可观测 Dashboard”个人 Agent。模型凭据保存在被 Git 忽略的 `config.toml`，API 不会向前端返回密钥。
+可运行的个人 Agent：**对话 + 长期记忆 + 工具 / MCP + 空闲 Drift + 可观测 Dashboard**。
 
-## 启动
+模型凭据写在被 Git 忽略的 `config.toml`（或 `data/models.override.toml`），HTTP API **永不回显密钥**，只返回是否已配置。
+
+当前 API 版本：**0.9.0**（启动后见 `GET /api/health` 与 `/docs`）。
+
+## 快速启动
 
 ```bash
-cd /root/project_job/Memoria-Agent
+cd Memoria-Agent
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd frontend && npm install && npm run build && cd ..
+cp config.example.toml config.toml   # 填写 llm.*.api_key / base_url
 .venv/bin/python main.py
 ```
 
-访问 `http://127.0.0.1:2237`。开发前端时可另开终端运行 `cd frontend && npm run dev`，Vite 会把 `/api` 代理到 2237。
+浏览器打开 [http://127.0.0.1:2237](http://127.0.0.1:2237)。
 
-要启用 SQLite 原生 KNN 向量索引，使用 `.venv/bin/pip install -r requirements-vector.txt`。未安装 `sqlite-vec` 时系统自动回退 JSON 向量扫描。
+| 场景 | 做法 |
+|---|---|
+| 前端热更新 | 另开终端 `cd frontend && npm run dev`（Vite 代理 `/api` → 2237） |
+| 向量 KNN | `.venv/bin/pip install -r requirements-vector.txt`；未装则自动 JSON 扫描 |
+| 自定义配置 | `python main.py --config /path/to/config.toml` |
+| 默认数据库 | `data/memoria.db` |
 
-自定义配置：复制 `config.example.toml` 为 `config.toml`，或通过 `python main.py --config /path/to/config.toml` 指定。数据库默认位于 `data/memoria.db`。
+改代码或升级依赖后请**重启** `main.py`，否则 Dashboard 可能仍是旧版本。
 
-## 当前核心闭环
+## 能力一览
 
-- 多会话对话及 SQLite 持久化
-- OpenAI-compatible 主模型调用
-- 多步模型工具调用循环与安全迭代上限
-- 五阶段生命周期流水线
-- 相关长期记忆注入
-- SSE 流式回复、停止生成、断连取消和 cancelled trace
-- 关键词/向量双路召回、RRF 融合、自动向量回填与语义去重
-- 检索规划/门控、FTS5 候选和按类型限额注入
-- 记忆强化、状态版本、LLM 一致性决策和 supersede 替代历史
-- 持久化后台记忆任务、租约/续租、可配置重试、按消息来源撤销与旧版本恢复
-- 长期记忆搜索、手动新增和删除
-- 内置记忆、历史、时间和安全计算工具
-- 会话、消息、记忆、模型、工具和生命周期状态面板
-- Turn trace：耗时、召回记忆、工具链与错误记录
-- 工具写权限、pre-hook、参数白名单、超时和输出上限
-- 可选 API Token、Origin 校验、请求限流、请求体上限与 Prometheus `/metrics`
-- API Key 脱敏（只返回是否已配置）
-- 轻量 Skills 目录：触发匹配注入、`load_skill`、白名单 `http_get`
-- Prompt Context Frame、会话压缩摘要、取消中断标记、Markdown 记忆导出
-- Markdown 真双层：`MEMORY.md` / `SELF.md` / `PENDING.md` 运行时读写
-- 模型热配置与 Setup 向导（页面配置、连通测试、密钥不回显）
-- Tool Search：`always_on` 直连 + `tool_search` / `tool_call` 按需暴露 schema
-- MCP 客户端：stdio JSON-RPC 发现/调用外部工具（`data/mcp_servers.json`）
-- Drift 空闲任务：预算/静默时段下跑限定技能，审计写入 `drift_runs`
+### 对话与运行时
 
-详细架构、模块边界、接口和后续阶段见 [系统架构与实现说明.md](docs/系统架构与实现说明.md)。
+- 多会话 SQLite 持久化；OpenAI-compatible 主 / 快 / embedding 模型
+- 多步工具循环、写权限策略、循环保护、超时与输出截断
+- SSE 流式回复、停止生成、断连取消与 cancelled trace
+- Prompt Context Frame、会话压缩摘要、EventBus、同一步并行工具
 
-API 使用、错误协议、请求示例和全部端点见 [API接口文档.md](docs/API接口文档.md)。服务启动后也可以直接访问 `http://127.0.0.1:2237/docs` 使用 Swagger UI。
+### 长期记忆
 
-API 代码集中在 `memoria/api/app.py`，并通过 `memoria/api/__init__.py` 保持稳定导入；模块维护说明见 [memoria/api/README.md](memoria/api/README.md)。可直接用于 LaTeX 简历的项目描述见 [简历项目经历.md](docs/简历项目经历.md)。
+- 关键词 + 向量双路召回、RRF、FTS5、按类型限额注入
+- 强化 / supersede / 后台 consolidation（租约、重试、撤销）
+- Markdown 真双层：`MEMORY.md`（投影）/ `SELF.md`（可编辑注入）/ `PENDING.md`（候选缓冲）
 
-本轮九项核心优化的实现与验收说明见 [核心优化第五轮：九项落地说明](docs/核心优化审计-第五轮-九项落地.md)。
+### 工具扩展
 
-后续九项生产化增强见 [核心优化第六轮：九项生产化增强](docs/核心优化审计-第六轮-生产化九项.md)。
+- 内置：`recall_memory`、`memorize`、`forget_memory`、`search_history`、`current_time`、`calculate`、`load_skill`、`http_get`
+- **Tool Search**：非 `always_on` 工具经 `tool_search` + `tool_call` 按需暴露，避免撑爆上下文（`[agent.tools].search_enabled`）
+- **MCP**：stdio JSON-RPC，配置 `data/mcp_servers.json`（示例见根目录 `mcp_servers.example.json`）
 
-第七轮从 Akashic 提炼的运行时增强见 [核心优化第七轮：Akashic运行时提炼](docs/核心优化审计-第七轮-Akashic运行时提炼.md)，包括 Prompt Context Frame、会话压缩、EventBus、并行工具、中断标记和 Markdown 记忆导出。
+### 空闲自动化
 
-第八轮轻量 Skills（`skills/*/SKILL.md` 发现、触发注入、`load_skill`/`http_get`）见 [核心优化第八轮：轻量Skills](docs/核心优化审计-第八轮-轻量Skills.md) 与 [skills/README.md](skills/README.md)。
+- **Drift**：无人对话时按预算跑限定技能（默认 `drift-digest` / `memory-review`）
+- 静默小时、空闲阈值、日预算、写工具白名单；审计表 `drift_runs`
+- 配置：`[agent.drift]`（见 `config.example.toml`）
 
-第九轮 Markdown 真双层与模型 Setup 向导见 [核心优化第九轮：Markdown双层与Setup](docs/核心优化审计-第九轮-Markdown双层与Setup.md)。
+### Dashboard / 安全
 
-第十轮 Tool Search + MCP 客户端见 [核心优化第十轮：ToolSearch与MCP](docs/核心优化审计-第十轮-ToolSearch与MCP.md)。
+- 对话、记忆、追踪（含 Drift）、工具实验台（含 MCP）、Setup 向导
+- 可选 API Token、Origin、限流、请求体上限、Prometheus `/metrics`
 
-第十一轮 Drift 空闲任务见 [核心优化第十一轮：Drift空闲任务](docs/核心优化审计-第十一轮-Drift空闲任务.md)。在 `[agent.drift]` 设 `enabled = true` 后，空闲时会跑 `drift-digest` / `memory-review`。
+## MCP（可选）
 
-推荐 MCP（官方参考实现，已在本机验证）：复制 `mcp_servers.example.json` → `data/mcp_servers.json`，把路径改成绝对路径后重启或 `POST /api/mcp/reload`。
+依赖：Node/`npx`，以及 [uv](https://docs.astral.sh/uv/) 的 `uvx`。
 
-| Server | 来源 | 用途 |
+```bash
+cp mcp_servers.example.json data/mcp_servers.json
+# 把 filesystem / git 路径改成绝对路径后重启，或 POST /api/mcp/reload
+```
+
+| Server | 命令 | 用途 |
 |---|---|---|
-| filesystem | `@modelcontextprotocol/server-filesystem` | 沙箱目录读写 |
-| fetch | `uvx mcp-server-fetch` | 抓取网页转文本 |
+| filesystem | `npx -y @modelcontextprotocol/server-filesystem <沙箱目录>` | 沙箱读写 |
+| fetch | `uvx mcp-server-fetch` | 网页转文本 |
 | time | `uvx mcp-server-time` | 时区时间 |
-| thinking | `@modelcontextprotocol/server-sequential-thinking` | 分步推理 |
-| git | `uvx mcp-server-git` | 只读 git 查询（示例已限制工具） |
+| thinking | `npx -y @modelcontextprotocol/server-sequential-thinking` | 分步推理 |
+| git | `uvx mcp-server-git --repository <repo>` | 只读 git（示例已限制工具） |
 
-依赖：Node/`npx`，以及 [uv](https://docs.astral.sh/uv/) 的 `uvx`。浏览器回归可运行 `cd frontend && npm run test:e2e`。
+本地工具名形如 `mcp_{server}_{tool}`；默认走 Tool Search，不直连塞满 schema。
+
+## Drift（可选）
+
+在 `config.toml` 中：
+
+```toml
+[agent.drift]
+enabled = true
+min_idle_seconds = 300
+interval_seconds = 10800
+max_steps = 8
+daily_budget = 6
+quiet_hours = [0, 1, 2, 3, 4, 5, 6]
+allowed_skills = ["drift-digest", "memory-review"]
+allow_write_tools = ["memorize"]   # 不要放 forget_memory
+timezone = "Asia/Shanghai"
+```
+
+- 状态 / 手动触发：`GET /api/drift`、`POST /api/drift/run`（`{"force": true}` 可跳过空闲/预算，仍不与用户对话并发）
+- Dashboard「追踪」页可查看并手动跑一轮
+
+## 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| [系统架构与实现说明.md](docs/系统架构与实现说明.md) | 模块边界与演进 |
+| [API接口文档.md](docs/API接口文档.md) | 端点、错误协议、示例 |
+| [项目规划说明书.md](docs/项目规划说明书.md) | 规划与对照 |
+| [简历项目经历.md](docs/简历项目经历.md) | 简历用描述 |
+| [skills/README.md](skills/README.md) | 轻量 Skills 约定 |
+| [memoria/api/README.md](memoria/api/README.md) | API 包维护说明 |
+
+**分轮实现说明**
+
+- [第五轮：九项落地](docs/核心优化审计-第五轮-九项落地.md) · [第六轮：生产化](docs/核心优化审计-第六轮-生产化九项.md)
+- [第七轮：Akashic 运行时](docs/核心优化审计-第七轮-Akashic运行时提炼.md) · [第八轮：Skills](docs/核心优化审计-第八轮-轻量Skills.md)
+- [第九轮：Markdown + Setup](docs/核心优化审计-第九轮-Markdown双层与Setup.md)
+- [第十轮：Tool Search + MCP](docs/核心优化审计-第十轮-ToolSearch与MCP.md)
+- [第十一轮：Drift](docs/核心优化审计-第十一轮-Drift空闲任务.md)
+
+交互式 Swagger：服务启动后访问 `/docs`。
+
+## 开发与验收
+
+```bash
+python -m pytest -q
+cd frontend && npm run build
+# 可选浏览器回归
+cd frontend && npm run test:e2e
+```
+
+主要目录：`memoria/`（后端）、`frontend/`（Dashboard）、`skills/`（SKILL.md）、`data/`（本地运行时，默认不进 Git）、`docs/`（说明与审计）。
