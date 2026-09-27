@@ -10,6 +10,7 @@ from typing import Any
 
 from ..store import Store
 from .embedding import EmbeddingClient
+from .layer import MarkdownMemoryLayer
 
 logger = logging.getLogger(__name__)
 MemoryDecider = Callable[[str, str, list[dict[str, Any]]], Awaitable[dict[str, str]]]
@@ -33,11 +34,19 @@ class MemoryWriteResult:
 class MemoryEngine:
     """Keyword + vector retrieval with RRF fusion and graceful lexical fallback."""
 
-    def __init__(self, store: Store, embedder: EmbeddingClient | None = None, decider: MemoryDecider | None = None, vector_scan_limit: int = 2000):
+    def __init__(
+        self,
+        store: Store,
+        embedder: EmbeddingClient | None = None,
+        decider: MemoryDecider | None = None,
+        vector_scan_limit: int = 2000,
+        markdown: MarkdownMemoryLayer | None = None,
+    ):
         self.store = store
         self.embedder = embedder
         self.decider = decider
         self.vector_scan_limit = max(100, vector_scan_limit)
+        self.markdown = markdown
 
     async def retrieve(self, query: str, limit: int = 8, kinds: set[str] | None = None) -> list[dict]:
         lexical_seed = self.store.keyword_memory_candidates(query, limit=200) if query.strip() else []
@@ -116,6 +125,11 @@ class MemoryEngine:
         return result.memory if result.action in {"created", "superseded"} else None
 
     async def remember(self, content: str, kind: str, importance: int, source: str, source_ref: str | None = None) -> MemoryWriteResult:
+        result = await self._remember(content, kind, importance, source, source_ref)
+        self._sync_markdown_layer(result, content=content, kind=kind, source_ref=source_ref)
+        return result
+
+    async def _remember(self, content: str, kind: str, importance: int, source: str, source_ref: str | None = None) -> MemoryWriteResult:
         content = content.strip()
         if not content:
             return MemoryWriteResult("skipped", None, reason="empty content")
@@ -180,6 +194,26 @@ class MemoryEngine:
 
         saved = self.store.add_memory(content, kind, importance, source, vector, source_ref=source_ref)
         return MemoryWriteResult("created", saved, reason="independent memory")
+
+    def refresh_markdown(self) -> str:
+        if not self.markdown or not self.markdown.enabled:
+            return ""
+        return self.markdown.sync_memory(self.store.memories(limit=5000))
+
+    def _sync_markdown_layer(
+        self,
+        result: MemoryWriteResult,
+        *,
+        content: str,
+        kind: str,
+        source_ref: str | None,
+    ) -> None:
+        if not self.markdown or not self.markdown.enabled:
+            return
+        if result.action in {"created", "reinforced", "superseded"}:
+            self.markdown.sync_memory(self.store.memories(limit=5000))
+            if source_ref:
+                self.markdown.complete_pending(source_ref=source_ref, content=content, kind=kind)
 
     async def reindex(self, limit: int = 1000) -> dict[str, int | bool]:
         items = self.store.memories(limit=max(1, min(limit, 5000)))

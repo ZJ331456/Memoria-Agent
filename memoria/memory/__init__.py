@@ -1,5 +1,6 @@
 from .embedding import EmbeddingClient, EmbeddingError
 from .engine import MemoryEngine, MemoryWriteResult
+from .layer import MarkdownMemoryLayer
 from .markdown import export_memories_markdown
 from .planner import MemoryQueryPlanner, RetrievalPlan
 from .worker import MemoryJobWorker
@@ -7,6 +8,7 @@ from .worker import MemoryJobWorker
 __all__ = [
     "EmbeddingClient",
     "EmbeddingError",
+    "MarkdownMemoryLayer",
     "MemoryEngine",
     "MemoryWriteResult",
     "MemoryQueryPlanner",

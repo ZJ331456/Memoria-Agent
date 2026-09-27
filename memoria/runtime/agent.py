@@ -11,6 +11,7 @@ from ..llm import ContextLengthError, LLMClient
 from ..memory import MemoryEngine, MemoryQueryPlanner
 from ..observability import EventBus, RequestContext, TurnTracer
 from ..prompting import ContextBudget, PromptAssembler, PromptSection
+from ..memory.layer import MarkdownMemoryLayer
 from ..skills import SkillCatalog
 from ..store import Store
 from ..tools import ToolPolicy, ToolRegistry
@@ -29,6 +30,7 @@ class AgentRuntime:
         pipeline: Pipeline | None = None,
         event_bus: EventBus | None = None,
         skills: SkillCatalog | None = None,
+        markdown: MarkdownMemoryLayer | None = None,
     ):
         self.settings = settings
         self.store = store
@@ -36,6 +38,7 @@ class AgentRuntime:
         self.memory = memory
         self.tools = tools
         self.skills = skills
+        self.markdown = markdown
         self.pipeline = pipeline or Pipeline()
         self.event_bus = event_bus or EventBus()
         self.context_budget = ContextBudget(settings.context_char_budget)
@@ -96,6 +99,11 @@ class AgentRuntime:
                 }
 
                 extra_sections: list[PromptSection] = []
+                if self.markdown and self.markdown.enabled:
+                    self_text = self.markdown.self_excerpt()
+                    if self_text.strip():
+                        extra_sections.append(PromptSection("Self", self_text, 15))
+                    context.metadata["markdown_layer"] = self.markdown.status()
                 if self.skills:
                     matches = self.skills.select(user_text)
                     catalog_text, active_text = self.skills.render_sections(matches)

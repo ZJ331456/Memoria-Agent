@@ -44,6 +44,10 @@ http_allowed_hosts = ["wttr.in", "api.open-meteo.com", "open-meteo.com"]
 enabled = true
 engine = ""
 
+[memory.markdown]
+enabled = true
+directory = "data/markdown"
+
 [memory.embedding]
 model = "text-embedding-v3"
 api_key = "${DASHSCOPE_API_KEY}"

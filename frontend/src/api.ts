@@ -8,7 +8,10 @@ export type MemoryJob={id:string;source_ref:string;status:'pending'|'running'|'r
 export type MemoryUndo={affected_ids:string[];restored_ids:string[]}
 export type Tool={name:string;description:string;risk:'read-only'|'write'|string}
 export type Trace={id:string;session_id:string;status:string;steps:number;duration_ms:number;memories:Memory[];tools:Array<{name:string;ok:boolean;elapsed_ms:number;preview:string;arguments:Record<string,unknown>}>;metadata:Record<string,any>;error:string|null;created_at:string}
-export type Overview={sessions:number;messages:number;memories:number;memories_superseded:number;traces:number;memory_jobs_pending:number;memory_jobs_failed:number;models:Record<string,any>;vector_index?:{enabled:boolean;backend:string;dimension:number|null;error:string};tools:Tool[];pipeline:Record<string,string[]>}
+export type ModelSlot={model:string;base_url:string;configured:boolean;api_key_set?:boolean}
+export type SetupStatus={main:ModelSlot;fast:ModelSlot;embedding:ModelSlot;setup_needed:boolean;override_path?:string}
+export type MarkdownStatus={enabled:boolean;directory?:string;files?:Record<string,number>;pending_open?:number}
+export type Overview={sessions:number;messages:number;memories:number;memories_superseded:number;traces:number;memory_jobs_pending:number;memory_jobs_failed:number;models:Record<string,any>;vector_index?:{enabled:boolean;backend:string;dimension:number|null;error:string};tools:Tool[];pipeline:Record<string,string[]>;markdown?:MarkdownStatus;setup?:SetupStatus}
 export class ApiError extends Error{constructor(message:string,public code:string,public requestId:string,public status:number){super(message)}}
 const apiToken=import.meta.env.VITE_MEMORIA_API_TOKEN as string|undefined
 const requestHeaders=()=>({'Content-Type':'application/json','X-Request-ID':crypto.randomUUID(),...(apiToken?{Authorization:`Bearer ${apiToken}`}:{})})
@@ -27,5 +30,13 @@ export const api={
  undoMemories:(sourceRefs:string[],dryRun=false)=>call<MemoryUndo>('/api/memories/undo',{method:'POST',body:JSON.stringify({source_refs:sourceRefs,dry_run:dryRun})}),
  updateMemory:(id:string,data:Partial<Pick<Memory,'content'|'kind'|'importance'>>)=>call<Memory>(`/api/memories/${id}`,{method:'PATCH',body:JSON.stringify(data)}), deleteMemory:(id:string)=>call<void>(`/api/memories/${id}`,{method:'DELETE'}),
  traces:(sessionId='')=>call<Trace[]>(`/api/traces?session_id=${encodeURIComponent(sessionId)}`), tools:()=>call<Tool[]>('/api/tools'),
- executeTool:(name:string,arguments_:Record<string,unknown>,confirmWrite=false)=>call<{name:string;ok:boolean;content:string;elapsed_ms:number}>(`/api/tools/${name}/execute`,{method:'POST',body:JSON.stringify({arguments:arguments_,confirm_write:confirmWrite})})
+ executeTool:(name:string,arguments_:Record<string,unknown>,confirmWrite=false)=>call<{name:string;ok:boolean;content:string;elapsed_ms:number}>(`/api/tools/${name}/execute`,{method:'POST',body:JSON.stringify({arguments:arguments_,confirm_write:confirmWrite})}),
+ setupStatus:()=>call<SetupStatus>('/api/setup/status'),
+ getModels:()=>call<SetupStatus>('/api/settings/models'),
+ updateModels:(data:Partial<Record<'main'|'fast'|'embedding',{model?:string;base_url?:string;api_key?:string}>>)=>call<SetupStatus>('/api/settings/models',{method:'PUT',body:JSON.stringify(data)}),
+ testModel:(slot:'main'|'fast'|'embedding')=>call<{ok:boolean;slot:string;message:string;status_code?:number}>('/api/settings/models/test',{method:'POST',body:JSON.stringify({slot})}),
+ markdownStatus:()=>call<MarkdownStatus>('/api/markdown'),
+ readMarkdown:(name:string)=>call<{name:string;content:string}>(`/api/markdown/${name}`),
+ writeMarkdown:(name:string,content:string)=>call<{name:string;content:string}>(`/api/markdown/${name}`,{method:'PUT',body:JSON.stringify({content})}),
+ syncMemoryMarkdown:()=>call<{name:string;content:string}>('/api/markdown/MEMORY/sync',{method:'POST'}),
 }

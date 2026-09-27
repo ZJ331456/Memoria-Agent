@@ -39,6 +39,8 @@ cd frontend && npm install && npm run build && cd ..
 - API Key 脱敏（只返回是否已配置）
 - 轻量 Skills 目录：触发匹配注入、`load_skill`、白名单 `http_get`
 - Prompt Context Frame、会话压缩摘要、取消中断标记、Markdown 记忆导出
+- Markdown 真双层：`MEMORY.md` / `SELF.md` / `PENDING.md` 运行时读写
+- 模型热配置与 Setup 向导（页面配置、连通测试、密钥不回显）
 
 详细架构、模块边界、接口和后续阶段见 [系统架构与实现说明.md](docs/系统架构与实现说明.md)。
 
@@ -52,4 +54,6 @@ API 代码集中在 `memoria/api/app.py`，并通过 `memoria/api/__init__.py` �
 
 第七轮从 Akashic 提炼的运行时增强见 [核心优化第七轮：Akashic运行时提炼](docs/核心优化审计-第七轮-Akashic运行时提炼.md)，包括 Prompt Context Frame、会话压缩、EventBus、并行工具、中断标记和 Markdown 记忆导出。
 
-第八轮轻量 Skills（`skills/*/SKILL.md` 发现、触发注入、`load_skill`/`http_get`）见 [核心优化第八轮：轻量Skills](docs/核心优化审计-第八轮-轻量Skills.md) 与 [skills/README.md](skills/README.md)。浏览器回归可运行 `cd frontend && npm run test:e2e`。
+第八轮轻量 Skills（`skills/*/SKILL.md` 发现、触发注入、`load_skill`/`http_get`）见 [核心优化第八轮：轻量Skills](docs/核心优化审计-第八轮-轻量Skills.md) 与 [skills/README.md](skills/README.md)。
+
+第九轮 Markdown 真双层与模型 Setup 向导见 [核心优化第九轮：Markdown双层与Setup](docs/核心优化审计-第九轮-Markdown双层与Setup.md)。浏览器回归可运行 `cd frontend && npm run test:e2e`。

@@ -69,6 +69,8 @@ class Settings:
     skills_directory: Path
     skills_max_inject: int
     http_allowed_hosts: tuple[str, ...]
+    markdown_enabled: bool
+    markdown_directory: Path
     host: str
     port: int
     source: Path
@@ -113,7 +115,10 @@ class Settings:
         skills_dir = Path(str(skills_section.get("directory", "skills")))
         if not skills_dir.is_absolute():
             skills_dir = root / skills_dir
-        return cls(
+        markdown_dir = Path(str(memory_section.get("markdown", {}).get("directory", "data/markdown")))
+        if not markdown_dir.is_absolute():
+            markdown_dir = root / markdown_dir
+        settings = cls(
             root=root,
             database=db,
             main=main,
@@ -140,10 +145,15 @@ class Settings:
             skills_directory=skills_dir,
             skills_max_inject=max(0, int(skills_section.get("max_inject", 2))),
             http_allowed_hosts=_string_tuple(tools_section.get("http_allowed_hosts"), default_http_hosts),
+            markdown_enabled=bool(memory_section.get("markdown", {}).get("enabled", True)),
+            markdown_directory=markdown_dir,
             host=str(server.get("host", "127.0.0.1")),
             port=int(server.get("port", 2237)),
             source=source,
         )
+        from .models_config import apply_overrides
+
+        return apply_overrides(settings)
 
     def public_dict(self) -> dict[str, Any]:
         def safe(value: ModelConfig) -> dict[str, Any]:
@@ -153,6 +163,8 @@ class Settings:
             "vector_backend": self.vector_backend, "auth_enabled": bool(self.api_token),
             "rate_limit_per_minute": self.rate_limit_per_minute, "config_source": str(self.source),
             "skills_enabled": self.skills_enabled, "skills_directory": str(self.skills_directory),
+            "markdown_enabled": self.markdown_enabled, "markdown_directory": str(self.markdown_directory),
+            "setup_needed": not bool(self.main.api_key and self.main.model and self.main.base_url),
         }
 
 

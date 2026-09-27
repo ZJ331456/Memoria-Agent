@@ -181,16 +181,38 @@ class ToolExecuteResponse(BaseModel):
     elapsed_ms: int
 
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
+    {"name": "setup", "description": "模型热配置、连通性测试与 Setup 向导。"},
     {"name": "sessions", "description": "会话生命周期和消息历史。"},
     {"name": "agent", "description": "执行完整 Agent turn，包括记忆召回、工具循环和 trace。"},
     {"name": "memories", "description": "长期记忆查询、创建、编辑和删除。"},
+    {"name": "markdown", "description": "MEMORY/SELF/PENDING Markdown 双层记忆。"},
     {"name": "tools", "description": "工具目录以及受风险级别保护的调试执行。"},
     {"name": "skills", "description": "轻量 SKILL.md 目录发现、读取与热重载。"},
     {"name": "traces", "description": "每轮推理的耗时、召回与工具调用诊断。"},
 ]
+
+
+class ModelSlotBody(StrictModel):
+    model: str | None = Field(default=None, max_length=200)
+    base_url: str | None = Field(default=None, max_length=500)
+    api_key: str | None = Field(default=None, max_length=500)
+
+
+class ModelsUpdateBody(StrictModel):
+    main: ModelSlotBody | None = None
+    fast: ModelSlotBody | None = None
+    embedding: ModelSlotBody | None = None
+
+
+class ModelTestBody(StrictModel):
+    slot: Literal["main", "fast", "embedding"] = "main"
+
+
+class MarkdownWriteBody(StrictModel):
+    content: str = Field(min_length=1, max_length=200000)
 
 
 def create_app(config_path: str | Path | None = None) -> FastAPI:
@@ -272,7 +294,59 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "tools": service.runtime.tools.catalog(),
             "pipeline": service.runtime.pipeline.inspect(),
             "skills": skills,
+            "markdown": service.markdown.status(),
+            "setup": service.models_public(),
         }
+
+    @app.get("/api/setup/status", tags=["setup"], summary="Setup 向导状态")
+    def setup_status():
+        return service.models_public()
+
+    @app.get("/api/settings/models", tags=["setup"], summary="读取脱敏后的模型配置")
+    def get_models():
+        return service.models_public()
+
+    @app.put("/api/settings/models", tags=["setup"], summary="热更新模型配置（不回显密钥）")
+    def put_models(body: ModelsUpdateBody):
+        updates = {
+            key: value
+            for key, value in body.model_dump(exclude_none=True).items()
+            if isinstance(value, dict) and value
+        }
+        if not updates:
+            raise HTTPException(422, "至少提供一个模型槽位")
+        return service.update_models(updates)
+
+    @app.post("/api/settings/models/test", tags=["setup"], summary="测试模型连通性")
+    async def test_models(body: ModelTestBody):
+        return await service.test_model(body.slot)
+
+    @app.get("/api/markdown", tags=["markdown"], summary="Markdown 双层状态")
+    def markdown_status():
+        return service.markdown.status()
+
+    @app.get("/api/markdown/{name}", tags=["markdown"], summary="读取 MEMORY/SELF/PENDING")
+    def read_markdown(name: str):
+        try:
+            content = service.markdown.read(name)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"name": name.upper() if name.lower() in {"memory", "self", "pending"} else name, "content": content}
+
+    @app.put("/api/markdown/{name}", tags=["markdown"], summary="写入 SELF 或 PENDING")
+    def write_markdown(name: str, body: MarkdownWriteBody):
+        try:
+            content = service.markdown.write(name, body.content)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"name": name, "content": content}
+
+    @app.post("/api/markdown/MEMORY/sync", tags=["markdown"], summary="从结构化记忆重写 MEMORY.md")
+    def sync_memory_markdown():
+        content = service.runtime.memory.refresh_markdown()
+        return {"name": "MEMORY", "content": content, "status": service.markdown.status()}
 
     @app.get("/api/tools", tags=["tools"], summary="列出模型可调用工具")
     def tools() -> list[dict[str, str]]:
@@ -457,7 +531,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/memories/undo", response_model=MemoryUndoResponse, tags=["memories"], summary="按消息来源撤销自动记忆")
     def undo_memories(body: MemoryUndoBody):
-        return store.undo_memory_sources(body.source_refs, body.dry_run)
+        result = store.undo_memory_sources(body.source_refs, body.dry_run)
+        if not body.dry_run:
+            service.runtime.memory.refresh_markdown()
+        return result
 
     @app.get("/api/memories/{memory_id}/history", response_model=list[MemoryReplacementResponse], tags=["memories"], summary="查询记忆替代历史")
     def memory_history(memory_id: str):
@@ -468,11 +545,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     def update_memory(memory_id: str, body: MemoryPatch):
         item = store.update_memory(memory_id, body.model_dump(exclude_unset=True))
         if not item: raise HTTPException(404, "记忆不存在")
+        service.runtime.memory.refresh_markdown()
         return item
 
     @app.delete("/api/memories/{memory_id}", status_code=204, tags=["memories"], summary="删除长期记忆")
     def delete_memory(memory_id: str):
         if not store.delete_memory(memory_id): raise HTTPException(404, "记忆不存在")
+        service.runtime.memory.refresh_markdown()
         return Response(status_code=204)
 
     dist = settings.root / "frontend" / "dist"
