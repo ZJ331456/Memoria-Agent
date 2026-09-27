@@ -43,6 +43,7 @@ cd frontend && npm install && npm run build && cd ..
 - 模型热配置与 Setup 向导（页面配置、连通测试、密钥不回显）
 - Tool Search：`always_on` 直连 + `tool_search` / `tool_call` 按需暴露 schema
 - MCP 客户端：stdio JSON-RPC 发现/调用外部工具（`data/mcp_servers.json`）
+- Drift 空闲任务：预算/静默时段下跑限定技能，审计写入 `drift_runs`
 
 详细架构、模块边界、接口和后续阶段见 [系统架构与实现说明.md](docs/系统架构与实现说明.md)。
 
@@ -61,6 +62,8 @@ API 代码集中在 `memoria/api/app.py`，并通过 `memoria/api/__init__.py` �
 第九轮 Markdown 真双层与模型 Setup 向导见 [核心优化第九轮：Markdown双层与Setup](docs/核心优化审计-第九轮-Markdown双层与Setup.md)。
 
 第十轮 Tool Search + MCP 客户端见 [核心优化第十轮：ToolSearch与MCP](docs/核心优化审计-第十轮-ToolSearch与MCP.md)。
+
+第十一轮 Drift 空闲任务见 [核心优化第十一轮：Drift空闲任务](docs/核心优化审计-第十一轮-Drift空闲任务.md)。在 `[agent.drift]` 设 `enabled = true` 后，空闲时会跑 `drift-digest` / `memory-review`。
 
 推荐 MCP（官方参考实现，已在本机验证）：复制 `mcp_servers.example.json` → `data/mcp_servers.json`，把路径改成绝对路径后重启或 `POST /api/mcp/reload`。
 

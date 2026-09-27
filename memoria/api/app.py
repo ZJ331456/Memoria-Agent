@@ -187,7 +187,11 @@ class ToolSearchBody(StrictModel):
     allowed_risk: list[Literal["read-only", "write", "external-side-effect"]] | None = None
 
 
-VERSION = "0.8.0"
+class DriftRunBody(StrictModel):
+    force: bool = False
+
+
+VERSION = "0.9.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
     {"name": "setup", "description": "模型热配置、连通性测试与 Setup 向导。"},
@@ -197,6 +201,7 @@ TAGS = [
     {"name": "markdown", "description": "MEMORY/SELF/PENDING Markdown 双层记忆。"},
     {"name": "tools", "description": "工具目录、Tool Search 与受风险级别保护的调试执行。"},
     {"name": "mcp", "description": "外部 MCP server 连接状态与热重载。"},
+    {"name": "drift", "description": "空闲 Drift 调度、手动触发与运行审计。"},
     {"name": "skills", "description": "轻量 SKILL.md 目录发现、读取与热重载。"},
     {"name": "traces", "description": "每轮推理的耗时、召回与工具调用诊断。"},
 ]
@@ -230,15 +235,19 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     active_turns: dict[str, asyncio.Task] = {}
     request_gate = RequestGate(settings)
     metrics = MetricRegistry()
+    service.set_busy_check(lambda: bool(active_turns))
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await service.start_integrations()
         memory_task = asyncio.create_task(service.memory_worker.run(), name="memoria-memory-worker")
+        drift_task = asyncio.create_task(service.drift.run_loop(), name="memoria-drift-worker")
         try:
             yield
         finally:
+            drift_task.cancel()
             memory_task.cancel()
+            with suppress(asyncio.CancelledError): await drift_task
             with suppress(asyncio.CancelledError): await memory_task
             for task in active_turns.values(): task.cancel()
             if active_turns: await asyncio.gather(*active_turns.values(), return_exceptions=True)
@@ -305,6 +314,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "tools": service.runtime.tools.catalog(),
             "tool_search": service.tool_presentation.public_status(),
             "mcp": service.mcp.status(),
+            "drift": service.drift.status(),
             "pipeline": service.runtime.pipeline.inspect(),
             "skills": skills,
             "markdown": service.markdown.status(),
@@ -382,6 +392,15 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.post("/api/mcp/reload", tags=["mcp"], summary="重新加载并连接 MCP servers")
     async def mcp_reload():
         return {"servers": [item.public_dict() for item in await service.mcp.reload()], "status": service.mcp.status()}
+
+    @app.get("/api/drift", tags=["drift"], summary="Drift 调度状态与最近运行")
+    def drift_status(limit: int = Query(default=20, ge=1, le=100)):
+        return {"status": service.drift.status(), "runs": service.drift.recent_runs(limit)}
+
+    @app.post("/api/drift/run", tags=["drift"], summary="手动触发一轮 Drift")
+    async def drift_run(body: DriftRunBody):
+        result = await service.drift.maybe_run(trigger="manual", force=body.force)
+        return {"result": result, "status": service.drift.status()}
 
     @app.get("/api/skills", tags=["skills"], summary="列出已发现的轻量技能")
     def list_skills():

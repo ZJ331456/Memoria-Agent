@@ -85,6 +85,20 @@ class Store:
                     cursor_message_id TEXT,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS drift_runs (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT,
+                    skill TEXT NOT NULL,
+                    trigger TEXT NOT NULL DEFAULT 'scheduler',
+                    status TEXT NOT NULL,
+                    steps INTEGER NOT NULL DEFAULT 0,
+                    summary TEXT NOT NULL DEFAULT '',
+                    trace_id TEXT NOT NULL DEFAULT '',
+                    error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    finished_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_drift_runs_created ON drift_runs(created_at DESC);
             """)
             self.db.commit()
             session_columns = {row[1] for row in self.db.execute("PRAGMA table_info(sessions)").fetchall()}
@@ -421,7 +435,106 @@ class Store:
             traces = self.db.execute("SELECT COUNT(*) FROM turn_traces").fetchone()[0]
             memory_jobs_pending = self.db.execute("SELECT COUNT(*) FROM memory_jobs WHERE status IN ('pending','retry','running')").fetchone()[0]
             memory_jobs_failed = self.db.execute("SELECT COUNT(*) FROM memory_jobs WHERE status='failed'").fetchone()[0]
-        return {"sessions": sessions, "messages": messages, "memories": memories, "memories_superseded": memories_superseded, "traces": traces, "memory_jobs_pending": memory_jobs_pending, "memory_jobs_failed": memory_jobs_failed}
+            drift_runs = self.db.execute("SELECT COUNT(*) FROM drift_runs").fetchone()[0]
+        return {
+            "sessions": sessions, "messages": messages, "memories": memories,
+            "memories_superseded": memories_superseded, "traces": traces,
+            "memory_jobs_pending": memory_jobs_pending, "memory_jobs_failed": memory_jobs_failed,
+            "drift_runs": drift_runs,
+        }
+
+    def seconds_since_last_user_message(self) -> float | None:
+        with self.lock:
+            row = self.db.execute(
+                "SELECT created_at FROM messages WHERE role='user' ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            created = datetime.fromisoformat(str(row["created_at"]))
+        except ValueError:
+            return None
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - created.astimezone(timezone.utc)).total_seconds())
+
+    def create_drift_run(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        skill: str,
+        trigger: str,
+        status: str = "running",
+    ) -> dict[str, Any]:
+        timestamp = now()
+        item = {
+            "id": run_id,
+            "session_id": session_id,
+            "skill": skill,
+            "trigger": trigger,
+            "status": status,
+            "steps": 0,
+            "summary": "",
+            "trace_id": "",
+            "error": "",
+            "created_at": timestamp,
+            "finished_at": None,
+        }
+        with self.lock:
+            self.db.execute(
+                """INSERT INTO drift_runs
+                (id,session_id,skill,trigger,status,steps,summary,trace_id,error,created_at,finished_at)
+                VALUES (:id,:session_id,:skill,:trigger,:status,:steps,:summary,:trace_id,:error,:created_at,:finished_at)""",
+                item,
+            )
+            self.db.commit()
+        return item
+
+    def finish_drift_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        summary: str,
+        steps: int,
+        trace_id: str,
+        error: str = "",
+    ) -> dict[str, Any]:
+        timestamp = now()
+        with self.lock:
+            self.db.execute(
+                """UPDATE drift_runs SET status=?, summary=?, steps=?, trace_id=?, error=?, finished_at=?
+                WHERE id=?""",
+                (status, summary[:4000], int(steps), trace_id, error[:500], timestamp, run_id),
+            )
+            self.db.commit()
+            row = self.db.execute("SELECT * FROM drift_runs WHERE id=?", (run_id,)).fetchone()
+        return dict(row) if row else {"id": run_id, "status": status}
+
+    def list_drift_runs(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT * FROM drift_runs ORDER BY created_at DESC LIMIT ?",
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def latest_drift_run(self) -> dict[str, Any] | None:
+        rows = self.list_drift_runs(1)
+        return rows[0] if rows else None
+
+    def drift_runs_today(self, tz: Any) -> int:
+        from datetime import datetime as dt
+
+        start = dt.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        with self.lock:
+            return int(
+                self.db.execute(
+                    "SELECT COUNT(*) FROM drift_runs WHERE created_at >= ? AND status != 'cancelled'",
+                    (start,),
+                ).fetchone()[0]
+            )
 
     def observability_summary(self) -> dict[str, Any]:
         with self.lock:

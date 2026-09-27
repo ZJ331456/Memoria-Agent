@@ -10,11 +10,13 @@ export type Tool={name:string;description:string;risk:'read-only'|'write'|string
 export type ToolSearchStatus={enabled:boolean;direct_tools:string[];searchable_tools:string[];groups:Array<{owner:string;tools:string[]}>}
 export type McpServerStatus={name:string;enabled:boolean;connected:boolean;tools:string[];error:string;command:string[];risk:string}
 export type McpStatus={enabled:boolean;config_path:string;servers:McpServerStatus[];tool_count:number}
+export type DriftStatus={enabled:boolean;running:boolean;busy:boolean;min_idle_seconds:number;interval_seconds:number;max_steps:number;daily_budget:number;runs_today:number;budget_remaining:number;quiet_hours:number[];allowed_skills:string[];allow_write_tools:string[];timezone:string;last_run:any;idle_seconds:number|null;session_id:string|null}
+export type DriftRun={id:string;session_id:string|null;skill:string;trigger:string;status:string;steps:number;summary:string;trace_id:string;error:string;created_at:string;finished_at:string|null}
 export type Trace={id:string;session_id:string;status:string;steps:number;duration_ms:number;memories:Memory[];tools:Array<{name:string;ok:boolean;elapsed_ms:number;preview:string;arguments:Record<string,unknown>}>;metadata:Record<string,any>;error:string|null;created_at:string}
 export type ModelSlot={model:string;base_url:string;configured:boolean;api_key_set?:boolean}
 export type SetupStatus={main:ModelSlot;fast:ModelSlot;embedding:ModelSlot;setup_needed:boolean;override_path?:string}
 export type MarkdownStatus={enabled:boolean;directory?:string;files?:Record<string,number>;pending_open?:number}
-export type Overview={sessions:number;messages:number;memories:number;memories_superseded:number;traces:number;memory_jobs_pending:number;memory_jobs_failed:number;models:Record<string,any>;vector_index?:{enabled:boolean;backend:string;dimension:number|null;error:string};tools:Tool[];tool_search?:ToolSearchStatus;mcp?:McpStatus;pipeline:Record<string,string[]>;markdown?:MarkdownStatus;setup?:SetupStatus}
+export type Overview={sessions:number;messages:number;memories:number;memories_superseded:number;traces:number;memory_jobs_pending:number;memory_jobs_failed:number;drift_runs?:number;models:Record<string,any>;vector_index?:{enabled:boolean;backend:string;dimension:number|null;error:string};tools:Tool[];tool_search?:ToolSearchStatus;mcp?:McpStatus;drift?:DriftStatus;pipeline:Record<string,string[]>;markdown?:MarkdownStatus;setup?:SetupStatus}
 export class ApiError extends Error{constructor(message:string,public code:string,public requestId:string,public status:number){super(message)}}
 const apiToken=import.meta.env.VITE_MEMORIA_API_TOKEN as string|undefined
 const requestHeaders=()=>({'Content-Type':'application/json','X-Request-ID':crypto.randomUUID(),...(apiToken?{Authorization:`Bearer ${apiToken}`}:{})})
@@ -37,6 +39,8 @@ export const api={
  searchTools:(query:string,topK=5)=>call<{matched_groups:any[];tip:string}>('/api/tools/search',{method:'POST',body:JSON.stringify({query,top_k:topK})}),
  mcpStatus:()=>call<McpStatus>('/api/mcp'),
  reloadMcp:()=>call<{status:McpStatus}>('/api/mcp/reload',{method:'POST'}),
+ driftStatus:()=>call<{status:DriftStatus;runs:DriftRun[]}>('/api/drift'),
+ runDrift:(force=false)=>call<{result:any;status:DriftStatus}>('/api/drift/run',{method:'POST',body:JSON.stringify({force})}),
  executeTool:(name:string,arguments_:Record<string,unknown>,confirmWrite=false)=>call<{name:string;ok:boolean;content:string;elapsed_ms:number}>(`/api/tools/${name}/execute`,{method:'POST',body:JSON.stringify({arguments:arguments_,confirm_write:confirmWrite})}),
  setupStatus:()=>call<SetupStatus>('/api/setup/status'),
  getModels:()=>call<SetupStatus>('/api/settings/models'),

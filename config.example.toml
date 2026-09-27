@@ -47,6 +47,18 @@ http_allowed_hosts = ["wttr.in", "api.open-meteo.com", "open-meteo.com"]
 enabled = true
 config_file = "data/mcp_servers.json"
 
+[agent.drift]
+# 空闲时跑限定技能（整理记忆候选等）；默认关闭，按需开启。
+enabled = false
+min_idle_seconds = 300
+interval_seconds = 10800
+max_steps = 8
+daily_budget = 6
+quiet_hours = [0, 1, 2, 3, 4, 5, 6]
+allowed_skills = ["drift-digest", "memory-review"]
+allow_write_tools = ["memorize"]
+timezone = "Asia/Shanghai"
+
 [memory]
 enabled = true
 engine = ""

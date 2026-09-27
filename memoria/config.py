@@ -34,6 +34,21 @@ def _string_tuple(value: Any, default: tuple[str, ...]) -> tuple[str, ...]:
     return result or default
 
 
+def _int_tuple(value: Any, default: tuple[int, ...]) -> tuple[int, ...]:
+    if value is None:
+        return default
+    values = [value] if isinstance(value, (int, float, str)) else value
+    if not isinstance(values, (list, tuple)):
+        raise ValueError("quiet_hours 必须是整数或整数数组")
+    result: list[int] = []
+    for item in values:
+        hour = int(item)
+        if hour < 0 or hour > 23:
+            raise ValueError("quiet_hours 必须在 0–23")
+        result.append(hour)
+    return tuple(result) if result else default
+
+
 @dataclass(slots=True)
 class ModelConfig:
     model: str
@@ -72,6 +87,15 @@ class Settings:
     tool_search_enabled: bool
     mcp_enabled: bool
     mcp_config_file: Path
+    drift_enabled: bool
+    drift_min_idle_seconds: int
+    drift_interval_seconds: int
+    drift_max_steps: int
+    drift_daily_budget: int
+    drift_quiet_hours: tuple[int, ...]
+    drift_allowed_skills: tuple[str, ...]
+    drift_allow_write_tools: tuple[str, ...]
+    drift_timezone: str
     markdown_enabled: bool
     markdown_directory: Path
     host: str
@@ -98,6 +122,8 @@ class Settings:
         storage = data.get("storage", {})
         tools_section = agent.get("tools", {})
         mcp_section = agent.get("mcp", {})
+        drift_section = agent.get("drift", {})
+        proactive_drift = data.get("proactive", {}).get("drift", {})
 
         def model(section: dict[str, Any]) -> ModelConfig:
             return ModelConfig(
@@ -127,6 +153,16 @@ class Settings:
             mcp_config = root / mcp_config
         tool_search_enabled = bool(
             tools_section.get("search_enabled", tools_section.get("tool_search_enabled", True))
+        )
+        # Prefer [agent.drift]; fall back to legacy [proactive.drift].
+        if not drift_section and proactive_drift:
+            drift_section = proactive_drift
+        min_interval_hours = float(drift_section.get("min_interval_hours", 3))
+        interval_seconds = int(
+            drift_section.get(
+                "interval_seconds",
+                max(60, int(min_interval_hours * 3600)),
+            )
         )
         settings = cls(
             root=root,
@@ -158,6 +194,23 @@ class Settings:
             tool_search_enabled=tool_search_enabled,
             mcp_enabled=bool(mcp_section.get("enabled", True)),
             mcp_config_file=mcp_config,
+            drift_enabled=bool(drift_section.get("enabled", False)),
+            drift_min_idle_seconds=max(30, int(drift_section.get("min_idle_seconds", 300))),
+            drift_interval_seconds=max(60, interval_seconds),
+            drift_max_steps=max(1, min(40, int(drift_section.get("max_steps", 8)))),
+            drift_daily_budget=max(1, int(drift_section.get("daily_budget", 6))),
+            drift_quiet_hours=_int_tuple(drift_section.get("quiet_hours"), (0, 1, 2, 3, 4, 5, 6)),
+            drift_allowed_skills=_string_tuple(
+                drift_section.get("allowed_skills"),
+                ("drift-digest", "memory-review"),
+            ),
+            drift_allow_write_tools=(
+                ()
+                if isinstance(drift_section.get("allow_write_tools"), (list, tuple))
+                and len(drift_section.get("allow_write_tools")) == 0
+                else _string_tuple(drift_section.get("allow_write_tools"), ("memorize",))
+            ),
+            drift_timezone=str(drift_section.get("timezone", "Asia/Shanghai")),
             markdown_enabled=bool(memory_section.get("markdown", {}).get("enabled", True)),
             markdown_directory=markdown_dir,
             host=str(server.get("host", "127.0.0.1")),
@@ -178,6 +231,7 @@ class Settings:
             "skills_enabled": self.skills_enabled, "skills_directory": str(self.skills_directory),
             "tool_search_enabled": self.tool_search_enabled,
             "mcp_enabled": self.mcp_enabled, "mcp_config_file": str(self.mcp_config_file),
+            "drift_enabled": self.drift_enabled,
             "markdown_enabled": self.markdown_enabled, "markdown_directory": str(self.markdown_directory),
             "setup_needed": not bool(self.main.api_key and self.main.model and self.main.base_url),
         }

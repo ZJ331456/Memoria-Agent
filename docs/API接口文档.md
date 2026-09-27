@@ -2,7 +2,7 @@
 
 ## 1. 文档范围
 
-本文描述 Memoria Agent `0.8.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试、Tool Search、MCP 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
+本文描述 Memoria Agent `0.9.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
 
 - 默认地址：`http://127.0.0.1:2237`
 - API 前缀：`/api`
@@ -48,12 +48,12 @@
 最小存活检查，不访问模型。
 
 ```json
-{"status":"ok","version":"0.8.0"}
+{"status":"ok","version":"0.9.0"}
 ```
 
 ### `GET /api/overview`
 
-返回 Dashboard 所需聚合数据：会话、消息、记忆、trace 数量；脱敏模型配置；工具目录；Tool Search / MCP 状态；生命周期模块。模型配置只返回 `configured`，永不返回 API Key。
+返回 Dashboard 所需聚合数据：会话、消息、记忆、trace 数量；脱敏模型配置；工具目录；Tool Search / MCP / Drift 状态；生命周期模块。模型配置只返回 `configured`，永不返回 API Key。
 
 ### `GET /metrics`
 
@@ -235,6 +235,20 @@ embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余�
 ### `POST /api/mcp/reload`
 
 重新读取 `mcp_servers.json`、断开旧连接并重新注册工具。
+
+## 7.2 Drift API
+
+### `GET /api/drift`
+
+返回调度状态（enabled、idle、预算、静默小时、最近 run）与最近运行列表。
+
+### `POST /api/drift/run`
+
+```json
+{"force": false}
+```
+
+`force=true` 时跳过空闲/冷却/静默/日预算检查（仍受写工具白名单约束）。响应包含 `result` 与最新 `status`。
 
 ## 8. Trace API
 

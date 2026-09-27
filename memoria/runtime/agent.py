@@ -12,10 +12,11 @@ from ..memory import MemoryEngine, MemoryQueryPlanner
 from ..observability import EventBus, RequestContext, TurnTracer
 from ..prompting import ContextBudget, PromptAssembler, PromptSection
 from ..memory.layer import MarkdownMemoryLayer
-from ..skills import SkillCatalog
+from ..skills import SkillCatalog, SkillMatch
 from ..store import Store
 from ..tools import ToolPolicy, ToolPresentation, ToolRegistry
 from ..tools.loop_guard import ToolLoopGuard
+from ..tools.policy import ToolAuthorization
 from .compaction import SessionCompactor
 
 
@@ -64,11 +65,18 @@ class AgentRuntime:
         user_text: str,
         on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         request_id: str | None = None,
+        *,
+        authorization: ToolAuthorization | None = None,
+        iteration_limit: int | None = None,
+        skip_memory_enqueue: bool = False,
+        force_skill: str | None = None,
+        turn_kind: str = "chat",
     ) -> tuple[dict, list[dict], dict]:
         turn_id = uuid.uuid4().hex
         tracer = TurnTracer(self.store, session_id)
         context = TurnContext(session_id, user_text)
         context.metadata["turn_id"] = turn_id
+        context.metadata["turn_kind"] = turn_kind
         with RequestContext(session_id=session_id, turn_id=turn_id, request_id=request_id):
             try:
                 await self.pipeline.run(Phase.BEFORE_TURN, context)
@@ -101,14 +109,30 @@ class AgentRuntime:
                 }
 
                 extra_sections: list[PromptSection] = []
+                if turn_kind == "drift":
+                    extra_sections.append(
+                        PromptSection(
+                            "Drift Mode",
+                            "这是空闲 Drift 轮次：遵守技能与写权限白名单，完成后给出简洁审计摘要。",
+                            12,
+                        )
+                    )
                 if self.markdown and self.markdown.enabled:
                     self_text = self.markdown.self_excerpt()
                     if self_text.strip():
                         extra_sections.append(PromptSection("Self", self_text, 15))
                     context.metadata["markdown_layer"] = self.markdown.status()
                 if self.skills:
-                    matches = self.skills.select(user_text)
-                    catalog_text, active_text = self.skills.render_sections(matches)
+                    if force_skill:
+                        record = self.skills.get(force_skill)
+                        if record:
+                            matches = [SkillMatch(record, 100.0, "drift_forced")]
+                        else:
+                            matches = self.skills.select(force_skill)
+                        catalog_text, active_text = self.skills.render_sections(matches)
+                    else:
+                        matches = self.skills.select(user_text)
+                        catalog_text, active_text = self.skills.render_sections(matches)
                     if catalog_text:
                         extra_sections.append(PromptSection("Available Skills", catalog_text, 40))
                     if active_text:
@@ -141,9 +165,13 @@ class AgentRuntime:
                 await self.pipeline.run(Phase.BEFORE_REASONING, context)
                 await self.event_bus.emit("turn.before_reasoning", {"session_id": session_id, "turn_id": turn_id})
 
-                max_steps = self._iteration_limit()
+                if iteration_limit is not None:
+                    max_steps = max(1, min(int(iteration_limit), self.HARD_ITERATION_CAP))
+                else:
+                    max_steps = self._iteration_limit()
                 loop_guard = ToolLoopGuard(max_identical=2)
-                authorization = self.tool_policy.authorize(user_text)
+                if authorization is None:
+                    authorization = self.tool_policy.authorize(user_text)
                 context.metadata["tool_authorization"] = {
                     "allowed_write_tools": sorted(authorization.allowed_write_tools),
                     "reason": authorization.reason,
@@ -235,7 +263,8 @@ class AgentRuntime:
 
                 await self.pipeline.run(Phase.AFTER_REASONING, context)
                 assistant_message = self.store.add_message(session_id, "assistant", context.response)
-                self.store.enqueue_memory_job(user_message["id"], user_text, context.response)
+                if not skip_memory_enqueue:
+                    self.store.enqueue_memory_job(user_message["id"], user_text, context.response)
                 created: list[dict] = []
                 await self.pipeline.run(Phase.AFTER_TURN, context)
                 await self.event_bus.emit(
