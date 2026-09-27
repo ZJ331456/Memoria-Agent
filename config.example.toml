@@ -31,6 +31,15 @@ max_iterations = 20
 memory_window = 40
 char_budget = 60000
 
+[agent.skills]
+enabled = true
+directory = "skills"
+max_inject = 2
+
+[agent.tools]
+# http_get 仅允许这些主机，供 weather / summarize 等技能使用。
+http_allowed_hosts = ["wttr.in", "api.open-meteo.com", "open-meteo.com"]
+
 [memory]
 enabled = true
 engine = ""

@@ -106,7 +106,7 @@ def test_sse_chat_endpoint_emits_delta_and_complete(tmp_path: Path):
     config.write_text(f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n[storage]\ndatabase="{tmp_path / 'stream.db'}"\n''', encoding="utf-8")
     app = create_app(config)
 
-    async def fake_chat(session_id, content, on_event=None):
+    async def fake_chat(session_id, content, on_event=None, request_id=None):
         if on_event:
             await on_event({"type":"delta","content":"流式"})
         message = app.state.store.add_message(session_id, "assistant", "流式完成")

@@ -65,6 +65,10 @@ class Settings:
     rate_limit_per_minute: int
     max_request_bytes: int
     metrics_enabled: bool
+    skills_enabled: bool
+    skills_directory: Path
+    skills_max_inject: int
+    http_allowed_hosts: tuple[str, ...]
     host: str
     port: int
     source: Path
@@ -78,6 +82,7 @@ class Settings:
         data = _read_with_parent(source.resolve())
         llm = data.get("llm", {})
         agent = data.get("agent", {})
+        skills_section = agent.get("skills", {})
         memory_section = data.get("memory", {})
         memory = memory_section.get("embedding", {})
         retrieval = memory_section.get("retrieval", {})
@@ -86,6 +91,7 @@ class Settings:
         security = server.get("security", {})
         observability = data.get("observability", {})
         storage = data.get("storage", {})
+        tools_section = agent.get("tools", {})
 
         def model(section: dict[str, Any]) -> ModelConfig:
             return ModelConfig(
@@ -100,9 +106,13 @@ class Settings:
         if vector_backend not in {"auto", "sqlite-vec", "json"}:
             raise ValueError("memory.retrieval.vector_backend 必须是 auto、sqlite-vec 或 json")
         default_origins = ("http://localhost:5173", "http://127.0.0.1:5173")
+        default_http_hosts = ("wttr.in", "api.open-meteo.com", "open-meteo.com")
         db = Path(str(storage.get("database", "data/memoria.db")))
         if not db.is_absolute():
             db = root / db
+        skills_dir = Path(str(skills_section.get("directory", "skills")))
+        if not skills_dir.is_absolute():
+            skills_dir = root / skills_dir
         return cls(
             root=root,
             database=db,
@@ -126,6 +136,10 @@ class Settings:
             rate_limit_per_minute=max(0, int(security.get("rate_limit_per_minute", 0))),
             max_request_bytes=max(1024, int(security.get("max_request_bytes", 1_048_576))),
             metrics_enabled=bool(observability.get("metrics_enabled", True)),
+            skills_enabled=bool(skills_section.get("enabled", True)),
+            skills_directory=skills_dir,
+            skills_max_inject=max(0, int(skills_section.get("max_inject", 2))),
+            http_allowed_hosts=_string_tuple(tools_section.get("http_allowed_hosts"), default_http_hosts),
             host=str(server.get("host", "127.0.0.1")),
             port=int(server.get("port", 2237)),
             source=source,
@@ -138,6 +152,7 @@ class Settings:
             "main": safe(self.main), "fast": safe(self.fast), "embedding": safe(self.embedding),
             "vector_backend": self.vector_backend, "auth_enabled": bool(self.api_token),
             "rate_limit_per_minute": self.rate_limit_per_minute, "config_source": str(self.source),
+            "skills_enabled": self.skills_enabled, "skills_directory": str(self.skills_directory),
         }
 
 

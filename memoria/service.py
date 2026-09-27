@@ -8,6 +8,7 @@ from .llm import LLMClient
 from .store import Store
 from .memory import EmbeddingClient, MemoryEngine, MemoryJobWorker
 from .runtime import AgentRuntime
+from .skills import SkillCatalog
 from .tools import build_registry
 
 
@@ -16,7 +17,18 @@ class AgentService:
         self.settings, self.store, self.llm = settings, store, llm
         embedder = EmbeddingClient(settings.embedding, min(settings.request_timeout_seconds, 30), settings.max_retries)
         memory = MemoryEngine(store, embedder, llm.decide_memory_relation, settings.vector_scan_limit)
-        self.runtime = AgentRuntime(settings, store, llm, memory, build_registry(store, memory))
+        self.skills = (
+            SkillCatalog(settings.skills_directory, max_inject=settings.skills_max_inject)
+            if settings.skills_enabled
+            else None
+        )
+        tools = build_registry(
+            store,
+            memory,
+            self.skills,
+            http_allowed_hosts=settings.http_allowed_hosts,
+        )
+        self.runtime = AgentRuntime(settings, store, llm, memory, tools, skills=self.skills)
         self.memory_worker = MemoryJobWorker(
             store, llm, memory, lease_seconds=settings.memory_job_lease_seconds,
             max_retries=settings.memory_job_max_retries, backoff_seconds=settings.memory_job_backoff_seconds,
@@ -26,6 +38,13 @@ class AgentService:
         message, memories, _ = await self.chat_with_trace(session_id, content)
         return message, memories
 
-    async def chat_with_trace(self, session_id: str, content: str, on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None) -> tuple[dict, list[dict], dict]:
-        if not self.store.session(session_id): raise KeyError(session_id)
-        return await self.runtime.run(session_id, content, on_event)
+    async def chat_with_trace(
+        self,
+        session_id: str,
+        content: str,
+        on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        request_id: str | None = None,
+    ) -> tuple[dict, list[dict], dict]:
+        if not self.store.session(session_id):
+            raise KeyError(session_id)
+        return await self.runtime.run(session_id, content, on_event, request_id=request_id)

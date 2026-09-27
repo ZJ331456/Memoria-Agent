@@ -1,5 +1,7 @@
 # Prompting 与上下文预算
 
+`PromptAssembler` 把身份 system prompt 与长期记忆/会话摘要/中断说明分开：后者进入 system-context-frame，避免模型把候选上下文当成用户原话。
+
 `ContextBudget` 防止会话历史和工具结果无限扩张。它采用确定性的字符预算，不依赖特定 tokenizer，因此可同时服务 DeepSeek、Qwen 和其他 OpenAI-compatible 模型。
 
 处理顺序：先截断超长工具结果；始终保留第一条 system；从最新消息向前选择；最后删除缺少对应 assistant tool call 的孤立 tool message。模型明确返回上下文超长时，Runtime 使用 45% 紧急预算重试一次。

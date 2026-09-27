@@ -18,7 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..config import Settings
 from ..llm import LLMClient
-from ..observability import MetricRegistry
+from ..memory import export_memories_markdown
+from ..observability import MetricRegistry, RequestContext
 from ..security import RequestGate
 from ..service import AgentService
 from ..store import Store
@@ -187,6 +188,7 @@ TAGS = [
     {"name": "agent", "description": "执行完整 Agent turn，包括记忆召回、工具循环和 trace。"},
     {"name": "memories", "description": "长期记忆查询、创建、编辑和删除。"},
     {"name": "tools", "description": "工具目录以及受风险级别保护的调试执行。"},
+    {"name": "skills", "description": "轻量 SKILL.md 目录发现、读取与热重载。"},
     {"name": "traces", "description": "每轮推理的耗时、召回与工具调用诊断。"},
 ]
 
@@ -225,13 +227,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         started = time.perf_counter()
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         request.state.request_id = request_id
-        denied = request_gate.check(request)
-        if denied:
-            status, code, message, headers = denied
-            response = _error(request, status, code, message)
-            response.headers.update(headers)
-        else:
-            response = await call_next(request)
+        with RequestContext(request_id=request_id):
+            denied = request_gate.check(request)
+            if denied:
+                status, code, message, headers = denied
+                response = _error(request, status, code, message)
+                response.headers.update(headers)
+            else:
+                response = await call_next(request)
         duration = time.perf_counter() - started
         route = getattr(request.scope.get("route"), "path", None) or re.sub(r"/[A-Fa-f0-9-]{16,}(?=/|$)", "/{id}", request.url.path)
         metrics.observe_http(request.method, route, response.status_code, duration)
@@ -261,11 +264,44 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.get("/api/overview", tags=["system"], summary="获取 Dashboard 总览")
     def overview() -> dict[str, Any]:
-        return {**store.overview(), "models": settings.public_dict(), "vector_index": store.vector_index_status, "tools": service.runtime.tools.catalog(), "pipeline": service.runtime.pipeline.inspect()}
+        skills = [item.public_dict() for item in service.skills.list()] if service.skills else []
+        return {
+            **store.overview(),
+            "models": settings.public_dict(),
+            "vector_index": store.vector_index_status,
+            "tools": service.runtime.tools.catalog(),
+            "pipeline": service.runtime.pipeline.inspect(),
+            "skills": skills,
+        }
 
     @app.get("/api/tools", tags=["tools"], summary="列出模型可调用工具")
     def tools() -> list[dict[str, str]]:
         return service.runtime.tools.catalog()
+
+    @app.get("/api/skills", tags=["skills"], summary="列出已发现的轻量技能")
+    def list_skills():
+        if not service.skills:
+            return []
+        return [item.public_dict() for item in service.skills.list()]
+
+    @app.get("/api/skills/{skill_name}", tags=["skills"], summary="读取技能正文")
+    def get_skill(skill_name: str):
+        if not service.skills:
+            raise HTTPException(404, "skills 未启用")
+        record = service.skills.get(skill_name)
+        if not record:
+            raise HTTPException(404, "技能不存在")
+        return {
+            **record.public_dict(),
+            "body": record.body,
+            "root_dir": str(record.root_dir) if record.root_dir else "",
+        }
+
+    @app.post("/api/skills/reload", tags=["skills"], summary="重新扫描 skills 目录")
+    def reload_skills():
+        if not service.skills:
+            raise HTTPException(404, "skills 未启用")
+        return [item.public_dict() for item in service.skills.reload()]
 
     @app.post("/api/tools/{tool_name}/execute", response_model=ToolExecuteResponse, tags=["tools"], summary="调试执行一个工具")
     async def execute_tool(tool_name: str, body: ToolExecuteBody):
@@ -306,13 +342,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return store.messages(session_id, limit)
 
     @app.post("/api/sessions/{session_id}/chat", response_model=ChatResponse, tags=["agent"], summary="执行一轮 Agent 对话")
-    async def chat(session_id: str, body: ChatBody):
+    async def chat(session_id: str, body: ChatBody, request: Request):
         if not store.session(session_id): raise HTTPException(404, "会话不存在")
         lock = session_locks.setdefault(session_id, asyncio.Lock())
         if lock.locked(): raise HTTPException(409, "该会话已有一轮对话正在执行")
+        request_id = getattr(request.state, "request_id", None)
         try:
             async with lock:
-                task = asyncio.create_task(service.chat_with_trace(session_id, body.content.strip()))
+                task = asyncio.create_task(service.chat_with_trace(session_id, body.content.strip(), request_id=request_id))
                 active_turns[session_id] = task
                 message, memories, trace = await task
             return {"message": message, "memories_created": memories, "trace": trace}
@@ -328,12 +365,15 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         lock = session_locks.setdefault(session_id, asyncio.Lock())
         if lock.locked() or session_id in active_turns: raise HTTPException(409, "该会话已有一轮对话正在执行")
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        request_id = getattr(request.state, "request_id", None)
 
         async def emit(event: dict[str, Any]): await queue.put(event)
         async def worker():
             try:
                 async with lock:
-                    message, memories, trace = await service.chat_with_trace(session_id, body.content.strip(), emit)
+                    message, memories, trace = await service.chat_with_trace(
+                        session_id, body.content.strip(), emit, request_id=request_id,
+                    )
                 await queue.put({"type":"complete","message":message,"memories_created":memories,"trace":trace})
             except asyncio.CancelledError:
                 await queue.put({"type":"cancelled","session_id":session_id})
@@ -380,6 +420,20 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if q.strip() and status == "active":
             return await service.runtime.memory.retrieve(q, limit)
         return store.memories(q, limit, status)
+
+    @app.get("/api/memories/export.md", tags=["memories"], summary="导出人类可读 Markdown 记忆层")
+    def export_memories_md(limit: int = Query(default=500, ge=1, le=2000)):
+        markdown = export_memories_markdown(store.memories("", limit, "active"))
+        return Response(markdown, media_type="text/markdown; charset=utf-8")
+
+    @app.get("/api/sessions/{session_id}/compaction", tags=["sessions"], summary="查看会话压缩摘要")
+    def session_compaction(session_id: str):
+        if not store.session(session_id):
+            raise HTTPException(404, "会话不存在")
+        item = store.session_compaction(session_id)
+        if not item:
+            return {"session_id": session_id, "summary": "", "covered_message_ids": [], "cursor_message_id": None, "updated_at": None}
+        return item
 
     @app.post("/api/memories", response_model=MemoryWriteResponse, tags=["memories"], summary="创建、强化或替代长期记忆")
     async def create_memory(body: MemoryBody):

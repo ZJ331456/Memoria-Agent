@@ -78,8 +78,18 @@ class Store:
                 CREATE TABLE IF NOT EXISTS runtime_metrics (
                     key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0
                 );
+                CREATE TABLE IF NOT EXISTS session_compactions (
+                    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                    summary TEXT NOT NULL,
+                    covered_message_ids TEXT NOT NULL DEFAULT '[]',
+                    cursor_message_id TEXT,
+                    updated_at TEXT NOT NULL
+                );
             """)
             self.db.commit()
+            session_columns = {row[1] for row in self.db.execute("PRAGMA table_info(sessions)").fetchall()}
+            if "interrupt_note" not in session_columns:
+                self.db.execute("ALTER TABLE sessions ADD COLUMN interrupt_note TEXT")
             memory_columns = {row[1] for row in self.db.execute("PRAGMA table_info(memories)").fetchall()}
             migrations = {
                 "embedding": "ALTER TABLE memories ADD COLUMN embedding TEXT",
@@ -150,9 +160,18 @@ class Store:
             self.db.close()
 
     def create_session(self, title: str = "新对话") -> dict[str, Any]:
-        item = {"id": uuid.uuid4().hex, "title": title.strip() or "新对话", "created_at": now(), "updated_at": now()}
+        item = {
+            "id": uuid.uuid4().hex,
+            "title": title.strip() or "新对话",
+            "created_at": now(),
+            "updated_at": now(),
+            "interrupt_note": None,
+        }
         with self.lock:
-            self.db.execute("INSERT INTO sessions VALUES (:id,:title,:created_at,:updated_at)", item)
+            self.db.execute(
+                "INSERT INTO sessions (id,title,created_at,updated_at,interrupt_note) VALUES (:id,:title,:created_at,:updated_at,:interrupt_note)",
+                item,
+            )
             self.db.commit()
         return item
 
@@ -185,6 +204,57 @@ class Store:
         with self.lock:
             self.db.execute("UPDATE sessions SET title=?, updated_at=? WHERE id=?", (title[:80], now(), session_id))
             self.db.commit()
+
+    def set_interrupt_note(self, session_id: str, note: str | None) -> None:
+        with self.lock:
+            self.db.execute(
+                "UPDATE sessions SET interrupt_note=?, updated_at=? WHERE id=?",
+                (note, now(), session_id),
+            )
+            self.db.commit()
+
+    def clear_interrupt_note(self, session_id: str) -> None:
+        self.set_interrupt_note(session_id, None)
+
+    def session_compaction(self, session_id: str) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.db.execute("SELECT * FROM session_compactions WHERE session_id=?", (session_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        try:
+            item["covered_message_ids"] = json.loads(item.get("covered_message_ids") or "[]")
+        except json.JSONDecodeError:
+            item["covered_message_ids"] = []
+        return item
+
+    def upsert_session_compaction(
+        self,
+        session_id: str,
+        summary: str,
+        covered_message_ids: list[str],
+        cursor_message_id: str | None,
+    ) -> dict[str, Any]:
+        item = {
+            "session_id": session_id,
+            "summary": summary,
+            "covered_message_ids": json.dumps(list(covered_message_ids), ensure_ascii=False),
+            "cursor_message_id": cursor_message_id,
+            "updated_at": now(),
+        }
+        with self.lock:
+            self.db.execute(
+                """INSERT INTO session_compactions (session_id,summary,covered_message_ids,cursor_message_id,updated_at)
+                   VALUES (:session_id,:summary,:covered_message_ids,:cursor_message_id,:updated_at)
+                   ON CONFLICT(session_id) DO UPDATE SET
+                     summary=excluded.summary,
+                     covered_message_ids=excluded.covered_message_ids,
+                     cursor_message_id=excluded.cursor_message_id,
+                     updated_at=excluded.updated_at""",
+                item,
+            )
+            self.db.commit()
+        return self.session_compaction(session_id) or item
 
     def delete_session(self, session_id: str) -> bool:
         with self.lock:
