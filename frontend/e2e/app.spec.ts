@@ -56,13 +56,32 @@ test('memory operations preview undo and retry failed jobs',async({page})=>{
 
 test('memory timeline opens on demand and mobile navigation keeps all sections',async({page})=>{
  await page.getByRole('tab',{name:'记忆'}).click()
- await page.getByRole('button',{name:'查看时间线'}).click()
+ await page.getByRole('button',{name:'检查并纠正'}).click()
  await expect(page.getByTestId('memory-timeline')).toContainText('以前喜欢红茶')
  await expect(page.getByTestId('memory-timeline')).toContainText('现在喜欢乌龙茶')
  await page.setViewportSize({width:390,height:844})
  for(const label of ['对话','记忆','追踪','工具','设置'])await expect(page.getByRole('tab',{name:label})).toBeVisible()
  const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth)
  expect(overflow).toBe(false)
+})
+
+test('memory correction creates a visible version with a reason',async({page})=>{
+ let current={...memory}
+ await page.route('**/api/memories',route=>route.fulfill({contentType:'application/json',body:JSON.stringify([current])}))
+ await page.route('**/api/memories/memory-1/correct',async route=>{
+  const body=route.request().postDataJSON()
+  current={...current,id:'memory-2',content:body.content,kind:body.kind,importance:body.importance,source:'user_correction',supersedes_id:'memory-1'}
+  await route.fulfill({contentType:'application/json',body:JSON.stringify(current)})
+ })
+ await page.route('**/api/memories/memory-2/timeline',route=>route.fulfill({contentType:'application/json',body:JSON.stringify([{...memory,status:'superseded',replacement_reason:null,replacement_relation:null},{...current,replacement_reason:'用户更正',replacement_relation:'correction'}])}))
+ await page.getByRole('tab',{name:'记忆'}).click()
+ await page.getByRole('button',{name:'检查并纠正'}).click()
+ await page.getByLabel('纠正后的记忆').fill('现在喜欢普洱茶')
+ await page.getByLabel('纠正原因').fill('用户更正')
+ await page.getByRole('button',{name:'保存纠正'}).click()
+ await expect(page.getByText('记忆已纠正，旧版本保留在时间线中')).toBeVisible()
+ await expect(page.getByTestId('memory-timeline')).toContainText('用户更正')
+ await expect(page.getByTestId('memory-timeline')).toContainText('现在喜欢普洱茶')
 })
 
 test('a failed setup request does not hide conversations',async({page})=>{

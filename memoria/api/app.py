@@ -84,6 +84,13 @@ class MemoryPatch(StrictModel):
     importance: int | None = Field(default=None, ge=1, le=5)
 
 
+class MemoryCorrectionBody(StrictModel):
+    content: str = Field(min_length=1, max_length=4000)
+    kind: MemoryKind
+    importance: int = Field(ge=1, le=5)
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class MemoryResponse(BaseModel):
     id: str
     content: str
@@ -96,6 +103,7 @@ class MemoryResponse(BaseModel):
     reinforcement: int = 1
     supersedes_id: str | None = None
     last_reinforced_at: str | None = None
+    source_ref: str | None = None
 
 
 class MemoryReindexResponse(BaseModel):
@@ -124,6 +132,7 @@ class MemoryReplacementResponse(BaseModel):
 
 class MemoryTimelineResponse(MemoryResponse):
     replacement_reason: str | None = None
+    replacement_relation: str | None = None
 
 
 class TraceResponse(BaseModel):
@@ -195,7 +204,7 @@ class DriftRunBody(StrictModel):
     force: bool = False
 
 
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
     {"name": "setup", "description": "模型热配置、连通性测试与 Setup 向导。"},
@@ -600,11 +609,36 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not store.memory(memory_id): raise HTTPException(404, "记忆不存在")
         return store.memory_timeline(memory_id)
 
-    @app.patch("/api/memories/{memory_id}", response_model=MemoryResponse, tags=["memories"], summary="编辑长期记忆")
-    def update_memory(memory_id: str, body: MemoryPatch):
-        item = store.update_memory(memory_id, body.model_dump(exclude_unset=True))
-        if not item: raise HTTPException(404, "记忆不存在")
-        service.runtime.memory.refresh_markdown()
+    @app.post("/api/memories/{memory_id}/correct", response_model=MemoryResponse, tags=["memories"], summary="纠正记忆并保留旧版本")
+    async def correct_memory(memory_id: str, body: MemoryCorrectionBody):
+        if not body.content.strip() or not body.reason.strip():
+            raise HTTPException(422, "纠正内容和原因不能为空")
+        current = store.memory(memory_id)
+        if not current: raise HTTPException(404, "记忆不存在")
+        if current["status"] != "active": raise HTTPException(409, "只能纠正当前有效版本，请刷新记忆列表")
+        try:
+            item = await service.runtime.memory.correct(memory_id, body.content, body.kind, body.importance, body.reason)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if not item: raise HTTPException(409, "记忆已被其他操作替代，请刷新记忆列表")
+        return item
+
+    @app.patch("/api/memories/{memory_id}", response_model=MemoryResponse, tags=["memories"], summary="编辑长期记忆并保留旧版本")
+    async def update_memory(memory_id: str, body: MemoryPatch):
+        changes = body.model_dump(exclude_unset=True, exclude_none=True)
+        if not changes: raise HTTPException(422, "至少提供一个修改字段")
+        current = store.memory(memory_id)
+        if not current: raise HTTPException(404, "记忆不存在")
+        if current["status"] != "active": raise HTTPException(409, "只能编辑当前有效版本，请刷新记忆列表")
+        try:
+            item = await service.runtime.memory.correct(
+                memory_id, changes.get("content", current["content"]),
+                changes.get("kind", current["kind"]), changes.get("importance", current["importance"]),
+                "用户通过 PATCH 编辑",
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if not item: raise HTTPException(409, "记忆已被其他操作替代，请刷新记忆列表")
         return item
 
     @app.delete("/api/memories/{memory_id}", status_code=204, tags=["memories"], summary="删除长期记忆")

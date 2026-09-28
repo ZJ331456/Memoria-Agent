@@ -382,10 +382,56 @@ class Store:
                 SELECT m.*, (
                     SELECT r.reason FROM memory_replacements r WHERE r.new_memory_id=m.id
                     ORDER BY r.created_at DESC, r.id DESC LIMIT 1
-                ) AS replacement_reason
+                ) AS replacement_reason, (
+                    SELECT r.relation FROM memory_replacements r WHERE r.new_memory_id=m.id
+                    ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+                ) AS replacement_relation
                 FROM memories m JOIN chain c ON c.id=m.id
                 ORDER BY m.created_at ASC, m.id ASC LIMIT 100""", (memory_id,)).fetchall()
         return [self._memory(dict(row)) for row in rows]
+
+    def correct_memory(
+        self, memory_id: str, content: str, kind: str, importance: int,
+        reason: str, embedding: list[float] | None = None,
+    ) -> dict[str, Any] | None:
+        """Replace one active version atomically, retaining the user's correction trail."""
+        timestamp = now()
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                previous = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active'", (memory_id,)).fetchone()
+                if previous is None:
+                    self.db.execute("ROLLBACK")
+                    return None
+                content = content.strip()
+                if (content, kind, importance) == (previous["content"], previous["kind"], previous["importance"]):
+                    raise ValueError("纠正内容与当前记忆相同")
+                item = {
+                    "id": uuid.uuid4().hex, "content": content, "kind": kind,
+                    "importance": importance, "source": "user_correction",
+                    "created_at": timestamp, "updated_at": timestamp,
+                    "embedding": json.dumps(embedding) if embedding else None,
+                    "status": "active", "reinforcement": 1,
+                    "supersedes_id": memory_id, "last_reinforced_at": None,
+                    "source_ref": None,
+                }
+                self.db.execute("""INSERT INTO memories
+                    (id,content,kind,importance,source,created_at,updated_at,embedding,status,reinforcement,supersedes_id,last_reinforced_at,source_ref)
+                    VALUES (:id,:content,:kind,:importance,:source,:created_at,:updated_at,:embedding,:status,:reinforcement,:supersedes_id,:last_reinforced_at,:source_ref)""", item)
+                self.db.execute("INSERT INTO memories_fts(id,content) VALUES (?,?)", (item["id"], content))
+                if embedding:
+                    self._prepare_vector_dimension(embedding, item["id"])
+                    self.vector_index.upsert(item["id"], embedding)
+                self.db.execute("UPDATE memories SET status='superseded',updated_at=? WHERE id=?", (timestamp, memory_id))
+                self.db.execute("""INSERT INTO memory_replacements
+                    (old_memory_id,new_memory_id,old_content,new_content,relation,reason,created_at)
+                    VALUES (?,?,?,?,'correction',?,?)""",
+                    (memory_id, item["id"], previous["content"], content, reason.strip(), timestamp))
+                self.db.execute("COMMIT")
+            except Exception:
+                self.db.execute("ROLLBACK")
+                raise
+        return self.memory(item["id"])
 
     def update_memory(self, memory_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         current = self.memory(memory_id)

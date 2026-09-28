@@ -35,8 +35,9 @@ def test_session_and_memory_crud(tmp_path: Path):
     timeline = client.get(f"/api/memories/{memory['id']}/timeline").json()
     assert len(timeline) == 1 and timeline[0]["id"] == memory["id"]
     assert "embedding" not in timeline[0]
-    assert client.patch(f"/api/memories/{memory['id']}", json={"importance": 5}).json()["importance"] == 5
-    assert client.delete(f"/api/memories/{memory['id']}").status_code == 204
+    edited = client.patch(f"/api/memories/{memory['id']}", json={"importance": 5}).json()
+    assert edited["importance"] == 5 and edited["id"] != memory["id"]
+    assert client.delete(f"/api/memories/{edited['id']}").status_code == 204
     assert client.patch(f"/api/sessions/{session['id']}", json={"title": "已重命名"}).json()["title"] == "已重命名"
     invalid = client.post("/api/memories", json={"content": "x", "unknown": True})
     assert invalid.status_code == 422
@@ -44,12 +45,63 @@ def test_session_and_memory_crud(tmp_path: Path):
     assert invalid.headers["X-Request-ID"]
 
 
+def test_user_correction_keeps_versions_and_can_restore(tmp_path: Path):
+    config = tmp_path / "config.toml"
+    config.write_text(
+        f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n'''
+        f'''[storage]\ndatabase="{tmp_path / 'correction.db'}"\n''', encoding="utf-8",
+    )
+    client = TestClient(create_app(config))
+    original = client.post("/api/memories", json={"content": "用户喜欢红茶", "kind": "preference", "importance": 3}).json()["memory"]
+    path = f"/api/memories/{original['id']}/correct"
+    body = {"content": "用户喜欢乌龙茶", "kind": "preference", "importance": 4, "reason": "用户明确更正偏好"}
+    corrected_response = client.post(path, json=body)
+    assert corrected_response.status_code == 200
+    corrected = corrected_response.json()
+    assert corrected["source"] == "user_correction"
+    assert corrected["supersedes_id"] == original["id"]
+    assert [item["id"] for item in client.get("/api/memories").json()] == [corrected["id"]]
+    assert client.get("/api/memories?q=红茶").json() == []
+    timeline = client.get(f"/api/memories/{corrected['id']}/timeline").json()
+    assert [item["id"] for item in timeline] == [original["id"], corrected["id"]]
+    assert timeline[1]["replacement_relation"] == "correction"
+    assert timeline[1]["replacement_reason"] == "用户明确更正偏好"
+    assert "embedding" not in timeline[1]
+    assert client.post(path, json=body).status_code == 409
+    assert client.post(f"/api/memories/{corrected['id']}/correct", json={**body, "reason": "重复"}).status_code == 422
+    assert client.post(f"/api/memories/{corrected['id']}/correct", json={**body, "reason": "  "}).status_code == 422
+    restored = client.post(f"/api/memories/{corrected['id']}/correct", json={
+        "content": original["content"], "kind": original["kind"], "importance": original["importance"],
+        "reason": "恢复历史版本",
+    })
+    assert restored.status_code == 200
+    assert [item["id"] for item in client.get("/api/memories").json()] == [restored.json()["id"]]
+    assert len(client.get(f"/api/memories/{restored.json()['id']}/timeline").json()) == 3
+
+
+def test_automatic_supersede_does_not_replace_user_correction(tmp_path: Path):
+    store = Store(tmp_path / "guard.db")
+    original = store.add_memory("用户喜欢红茶", "preference")
+    corrected = store.correct_memory(original["id"], "用户喜欢乌龙茶", "preference", 4, "用户纠正")
+
+    async def decide(_content, _kind, related):
+        assert related[0]["id"] == corrected["id"]
+        return {"action": "supersede", "target_id": corrected["id"], "reason": "自动判断"}
+
+    result = asyncio.run(MemoryEngine(store, decider=decide).remember(
+        "用户喜欢乌龙茶饮品", "preference", 3, "conversation", "message-1",
+    ))
+    assert result.action == "skipped"
+    assert [item["id"] for item in store.memories()] == [corrected["id"]]
+    store.close()
+
+
 def test_openapi_and_tool_debug(tmp_path: Path):
     config = tmp_path / "config.toml"
     config.write_text(f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n[storage]\ndatabase="{tmp_path / 'api.db'}"\n''', encoding="utf-8")
     client = TestClient(create_app(config))
     schema = client.get("/openapi.json").json()
-    assert schema["info"]["version"] == "0.9.0"
+    assert schema["info"]["version"] == "0.10.0"
     assert "/api/tools/{tool_name}/execute" in schema["paths"]
     assert "/api/memories/reindex" in schema["paths"]
     assert "/api/memories/{memory_id}/history" in schema["paths"]

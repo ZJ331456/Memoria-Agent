@@ -181,6 +181,8 @@ class MemoryEngine:
             target_id = decision.get("target_id", "")
             target = next((item for item in related if item["id"] == target_id), None)
             action = decision.get("action", "create")
+            if target and target.get("source") == "user_correction" and source != "manual" and action == "supersede":
+                return MemoryWriteResult("skipped", target, target_id, "user correction requires explicit review")
             if target and action == "reinforce" and float(target["relation_similarity"]) >= 0.78:
                 if source_ref and self.store.has_memory_operation(source_ref, target_id):
                     return MemoryWriteResult("skipped", target, target_id, "source already applied")
@@ -199,6 +201,21 @@ class MemoryEngine:
         if not self.markdown or not self.markdown.enabled:
             return ""
         return self.markdown.sync_memory(self.store.memories(limit=5000))
+
+    async def correct(self, memory_id: str, content: str, kind: str, importance: int, reason: str) -> dict[str, Any] | None:
+        current = self.store.memory(memory_id)
+        if not current or current["status"] != "active":
+            return None
+        vector = current.get("embedding") if content.strip() == current["content"] else None
+        if vector is None and self.embedder and self.embedder.enabled:
+            try:
+                vector = await asyncio.wait_for(self.embedder.embed(content), timeout=self.embedder.timeout_seconds + 1)
+            except Exception as exc:
+                logger.warning("纠正记忆向量化不可用，使用关键词检索: %s", type(exc).__name__)
+        corrected = self.store.correct_memory(memory_id, content, kind, importance, reason, vector)
+        if corrected:
+            self.refresh_markdown()
+        return corrected
 
     def _sync_markdown_layer(
         self,

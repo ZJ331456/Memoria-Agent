@@ -4,7 +4,7 @@
 
 模型凭据写在被 Git 忽略的 `config.toml`（或 `data/models.override.toml`），HTTP API **永不回显密钥**，只返回是否已配置。
 
-当前 API 版本：**0.9.0**（启动后见 `GET /api/health` 与 `/docs`）。
+当前 API 版本：**0.10.0**（启动后见 `GET /api/health` 与 `/docs`）。
 
 ## 快速启动
 
@@ -41,6 +41,7 @@ cp config.example.toml config.toml   # 填写 llm.*.api_key / base_url
 
 - 关键词 + 向量双路召回、RRF、FTS5、按类型限额注入
 - 强化 / supersede / 后台 consolidation（租约、重试、撤销）
+- Dashboard 可检查来源与完整版本链，填写原因后纠正记忆，或从历史版本恢复；旧版本保留
 - Markdown 真双层：`MEMORY.md`（投影）/ `SELF.md`（可编辑注入）/ `PENDING.md`（候选缓冲）
 
 ### 工具扩展
@@ -109,6 +110,7 @@ timezone = "Asia/Shanghai"
 | [项目规划说明书.md](docs/项目规划说明书.md) | 规划与对照 |
 | [五项目对照与第十二轮优化.md](docs/五项目对照与第十二轮优化.md) | 五个参考项目对照、长问题召回修复与后续优先级 |
 | [前后端优化与记忆时间线.md](docs/前后端优化与记忆时间线.md) | 前后端审计、界面改版及 Akashic/Claude-Mem 机制落地 |
+| [Holt 对照与可纠正记忆.md](docs/Holt对照与可纠正记忆.md) | Holt 思想对照、用户纠正链路及行为边界 |
 | [简历项目经历.md](docs/简历项目经历.md) | 简历用描述 |
 | [skills/README.md](skills/README.md) | 轻量 Skills 约定 |
 | [memoria/api/README.md](memoria/api/README.md) | API 包维护说明 |

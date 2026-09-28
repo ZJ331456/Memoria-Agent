@@ -2,7 +2,7 @@
 
 ## 1. 文档范围
 
-本文描述 Memoria Agent `0.9.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
+本文描述 Memoria Agent `0.10.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
 
 - 默认地址：`http://127.0.0.1:2237`
 - API 前缀：`/api`
@@ -48,7 +48,7 @@
 最小存活检查，不访问模型。
 
 ```json
-{"status":"ok","version":"0.9.0"}
+{"status":"ok","version":"0.10.0"}
 ```
 
 ### `GET /api/overview`
@@ -159,7 +159,7 @@
 - `reinforce`：已有记忆强化次数加一，不产生重复行。
 - `supersede`：写入新记忆，旧记忆变为 `superseded` 并退出对话召回。
 
-响应结构为 `{"action":"created|reinforced|superseded","memory":{...},"previous_id":null,"reason":"..."}`。其中 `memory` 新增 `status`、`reinforcement`、`supersedes_id` 和 `last_reinforced_at`，不会返回 embedding 原文。
+响应结构为 `{"action":"created|reinforced|superseded","memory":{...},"previous_id":null,"reason":"..."}`。其中 `memory` 包含 `status`、`reinforcement`、`supersedes_id`、`last_reinforced_at` 和可选的 `source_ref`，不会返回 embedding 原文。
 
 ### `POST /api/memories/reindex?limit=1000`
 
@@ -189,11 +189,21 @@ embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余�
 
 ### `GET /api/memories/{memory_id}/timeline`
 
-按创建时间返回与该记忆相连的完整替代链，包含当前与历史版本的正文、状态、来源及 `replacement_reason`。仅在用户展开记忆详情时调用；最多返回 100 个版本，不返回 embedding。记忆不存在时返回 404。手动永久删除的版本不再作为记忆行返回。
+按创建时间返回与该记忆相连的完整替代链，包含当前与历史版本的正文、状态、来源、`source_ref`、`replacement_reason` 和 `replacement_relation`。用户纠正的关系值为 `correction`。仅在用户展开记忆详情时调用；最多返回 100 个版本，不返回 embedding。记忆不存在时返回 404。手动永久删除的版本不再作为记忆行返回。
+
+### `POST /api/memories/{memory_id}/correct`
+
+显式纠正当前有效记忆，并以原子事务写入新版本、旧版状态和带原因的替代记录。请求：
+
+```json
+{"content":"用户现在喜欢乌龙茶","kind":"preference","importance":4,"reason":"用户明确更正偏好"}
+```
+
+响应为新版本记忆，`source=user_correction`，`supersedes_id` 指向原版本。纠正内容或原因空白、字段不合法、内容与当前版本相同时返回 422；旧版本或并发失效返回 409；不存在返回 404。纠正后只有新版本参与检索和 `MEMORY.md` 投影。要恢复历史版本，可读取时间线，再用历史正文、类型和重要度调用此接口，仍会产生一条可审计的新版本。
 
 ### `PATCH /api/memories/{memory_id}`
 
-可部分更新 `content`、`kind`、`importance`。至少应提供一个字段。
+可部分更新 `content`、`kind`、`importance`。从 `0.10.0` 起也会生成新版本，响应 ID 会变化，替代原因为“用户通过 PATCH 编辑”；推荐在 Dashboard 使用带显式原因的 `/correct`。至少应提供一个实际修改字段。
 
 ### `DELETE /api/memories/{memory_id}`
 
@@ -282,7 +292,7 @@ curl -s "$BASE/api/traces?session_id=$SESSION"
 | 前端功能 | 使用 API |
 |---|---|
 | 对话实验室 | sessions、messages、chat/stream、cancel |
-| 长期记忆 | memories GET/POST/PATCH/DELETE/reindex/undo、memory-jobs |
+| 长期记忆 | memories GET/POST/PATCH/DELETE/correct/timeline/reindex/undo、memory-jobs |
 | 运行追踪 | overview、traces |
 | 工具实验台 | tools、tools execute |
 

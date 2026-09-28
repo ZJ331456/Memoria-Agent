@@ -73,6 +73,12 @@ body { background: #faf8f3; }
 .memory-item { border-color: #e2eae0; box-shadow: none; }
 .memory-item[data-selected="true"] { border-color: #71bca7; box-shadow: 0 0 0 2px #71bca72c; }
 .memory-item [data-slot="card-footer"] { justify-content: space-between; flex-wrap: wrap; background: #fbfcf9; }
+.memory-review { margin-top: 1.25rem; padding: 1rem; border: 1px solid #d5e8dc; border-radius: 1rem; background: #fcfefb; }
+.memory-review-hint { margin: .65rem 0 1rem; color: #617d75; font-size: .8rem; line-height: 1.5; }
+.memory-review-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.memory-review-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
+.memory-restore { margin-top: .5rem; }
+.memory-timeline-heading small, .timeline-entry small { overflow-wrap: anywhere; }
 .memory-title span { color: #d3a74f; letter-spacing: .08em; }
 .memory-timeline { margin-top: 1.25rem; padding: 1rem; border: 1px solid #d5e8dc; border-radius: 1rem; background: linear-gradient(140deg, #f4faf5, #fffdf8); }
 .memory-timeline-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
