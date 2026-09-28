@@ -10,6 +10,7 @@
 - 写边界：仅 `allow_write_tools`（默认 `memorize`，永不默认开放 `forget_memory`）
 - 不入队普通记忆抽取 job；摘要可 append 到 `PENDING.md`
 - 审计表：`drift_runs`
+- 同技能下一轮读取最近一次已完成运行的摘要（最多 800 字）作为接续参考；失败、取消及其他技能的摘要不注入
 
 ## 配置
 

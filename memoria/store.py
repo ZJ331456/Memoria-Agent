@@ -100,6 +100,7 @@ class Store:
                     finished_at TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_drift_runs_created ON drift_runs(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_drift_runs_skill ON drift_runs(skill, status, finished_at DESC);
             """)
             self.db.commit()
             session_columns = {row[1] for row in self.db.execute("PRAGMA table_info(sessions)").fetchall()}
@@ -555,6 +556,15 @@ class Store:
     def latest_drift_run(self) -> dict[str, Any] | None:
         rows = self.list_drift_runs(1)
         return rows[0] if rows else None
+
+    def latest_completed_drift_run(self, skill: str) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.db.execute(
+                """SELECT * FROM drift_runs WHERE skill=? AND status='completed' AND summary<>''
+                ORDER BY finished_at DESC LIMIT 1""",
+                (skill,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def drift_runs_today(self, tz: Any) -> int:
         """Count today's runs in the given local timezone (compare in UTC)."""

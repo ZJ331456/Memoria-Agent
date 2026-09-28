@@ -93,6 +93,49 @@ database="{tmp_path / 'w.db'}"
     assert result and result.get("skipped") and result.get("reason") == "disabled"
 
 
+def test_drift_continues_from_last_completed_run_of_same_skill(tmp_path: Path):
+    config = tmp_path / "continuity.toml"
+    config.write_text(
+        f'''[llm.main]
+model="test"
+api_key="x"
+base_url="http://example.test/v1"
+[storage]
+database="{tmp_path / 'continuity.db'}"
+''', encoding="utf-8",
+    )
+    store = Store(tmp_path / "continuity.db")
+    for run_id, skill, status, summary in [
+        ("previous", "drift-digest", "completed", "上次检查到目标记忆，需要继续核对来源"),
+        ("failed", "drift-digest", "failed", "失败轮次不应注入"),
+        ("other", "memory-review", "completed", "其他技能不应注入"),
+    ]:
+        store.create_drift_run(run_id=run_id, session_id=None, skill=skill, trigger="test")
+        store.finish_drift_run(run_id, status=status, summary=summary, steps=1, trace_id="")
+
+    class FakeEvents:
+        async def emit(self, *_args):
+            pass
+
+    class FakeRuntime:
+        event_bus = FakeEvents()
+        prompt = ""
+
+        async def run(self, _session_id, prompt, **_kwargs):
+            self.prompt = prompt
+            return {"content": "已完成核对"}, [], {"steps": 1, "id": "trace-1"}
+
+    runtime = FakeRuntime()
+    worker = DriftWorker(store=store, runtime=runtime, skills=None, markdown=None, settings=Settings.load(config))
+    result = asyncio.run(worker.maybe_run(trigger="test", force=True))
+
+    assert result and result["status"] == "completed"
+    assert "上次检查到目标记忆" in runtime.prompt
+    assert "失败轮次不应注入" not in runtime.prompt
+    assert "其他技能不应注入" not in runtime.prompt
+    assert store.latest_completed_drift_run("drift-digest")["id"] == result["id"]
+
+
 def test_drift_digest_skill_present():
     root = Path(__file__).resolve().parents[1] / "skills" / "drift-digest" / "SKILL.md"
     assert root.exists()

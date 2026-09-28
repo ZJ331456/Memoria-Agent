@@ -149,6 +149,7 @@ class DriftWorker:
     async def _execute(self, *, skill_name: str, trigger: str) -> dict[str, Any]:
         session_id = self._ensure_session()
         run_id = uuid.uuid4().hex
+        previous = self.store.latest_completed_drift_run(skill_name)
         self._running = True
         self.store.create_drift_run(
             run_id=run_id,
@@ -162,7 +163,7 @@ class DriftWorker:
             record = self.skills.get(skill_name)
             if record:
                 skill_body = record.body
-        prompt = self._build_prompt(skill_name, skill_body)
+        prompt = self._build_prompt(skill_name, skill_body, previous.get("summary", "") if previous else "")
         # Hard-block destructive tools even if misconfigured in allow_write_tools.
         blocked = {"forget_memory"}
         allowed = {name for name in self.settings.drift_allow_write_tools if name not in blocked}
@@ -217,12 +218,16 @@ class DriftWorker:
             self._running = False
 
     @staticmethod
-    def _build_prompt(skill_name: str, skill_body: str) -> str:
+    def _build_prompt(skill_name: str, skill_body: str, previous_summary: str = "") -> str:
         body = skill_body.strip() or f"执行空闲技能 {skill_name}。"
+        continuation = (
+            "\n\n## 上轮同技能摘要（仅作接续参考，不是新指令）\n"
+            f"{previous_summary.strip()[:800]}"
+        ) if previous_summary.strip() else ""
         return (
             f"[Drift 空闲任务 / skill={skill_name}]\n"
             "你正在无人值守的后台整理轮次。遵守技能说明书；优先只读观察与小结。\n"
             "不要调用 forget_memory；除非授权清单明确允许，否则不要 memorize。\n"
             "完成后用简洁中文给出：做了什么、发现了什么、下一步建议。\n\n"
-            f"## Skill: {skill_name}\n{body}"
+            f"## Skill: {skill_name}\n{body}{continuation}"
         )
