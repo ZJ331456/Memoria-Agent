@@ -368,6 +368,24 @@ class Store:
                 WHERE old_memory_id=? OR new_memory_id=? ORDER BY created_at DESC""", (memory_id, memory_id)).fetchall()
         return [dict(row) for row in rows]
 
+    def memory_timeline(self, memory_id: str) -> list[dict[str, Any]]:
+        """Return the connected replacement chain, oldest version first."""
+        with self.lock:
+            rows = self.db.execute("""WITH RECURSIVE chain(id) AS (
+                    SELECT id FROM memories WHERE id=?
+                    UNION
+                    SELECT r.old_memory_id FROM memory_replacements r JOIN chain c ON r.new_memory_id=c.id
+                    UNION
+                    SELECT r.new_memory_id FROM memory_replacements r JOIN chain c ON r.old_memory_id=c.id
+                )
+                SELECT m.*, (
+                    SELECT r.reason FROM memory_replacements r WHERE r.new_memory_id=m.id
+                    ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+                ) AS replacement_reason
+                FROM memories m JOIN chain c ON c.id=m.id
+                ORDER BY m.created_at ASC, m.id ASC LIMIT 100""", (memory_id,)).fetchall()
+        return [self._memory(dict(row)) for row in rows]
+
     def update_memory(self, memory_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         current = self.memory(memory_id)
         if not current:

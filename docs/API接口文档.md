@@ -187,6 +187,10 @@ embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余�
 
 查询一条记忆作为旧版本或新版本参与的替代记录，包括新旧 ID、正文快照、关系、判定原因和时间。记忆不存在时返回 404。
 
+### `GET /api/memories/{memory_id}/timeline`
+
+按创建时间返回与该记忆相连的完整替代链，包含当前与历史版本的正文、状态、来源及 `replacement_reason`。仅在用户展开记忆详情时调用；最多返回 100 个版本，不返回 embedding。记忆不存在时返回 404。手动永久删除的版本不再作为记忆行返回。
+
 ### `PATCH /api/memories/{memory_id}`
 
 可部分更新 `content`、`kind`、`importance`。至少应提供一个字段。

@@ -32,6 +32,9 @@ def test_session_and_memory_crud(tmp_path: Path):
     assert reinforced.status_code == 200 and reinforced.json()["action"] == "reinforced"
     assert client.get("/api/memories").json()[0]["reinforcement"] == 2
     assert client.get(f"/api/memories/{memory['id']}/history").json() == []
+    timeline = client.get(f"/api/memories/{memory['id']}/timeline").json()
+    assert len(timeline) == 1 and timeline[0]["id"] == memory["id"]
+    assert "embedding" not in timeline[0]
     assert client.patch(f"/api/memories/{memory['id']}", json={"importance": 5}).json()["importance"] == 5
     assert client.delete(f"/api/memories/{memory['id']}").status_code == 204
     assert client.patch(f"/api/sessions/{session['id']}", json={"title": "已重命名"}).json()["title"] == "已重命名"
@@ -50,6 +53,7 @@ def test_openapi_and_tool_debug(tmp_path: Path):
     assert "/api/tools/{tool_name}/execute" in schema["paths"]
     assert "/api/memories/reindex" in schema["paths"]
     assert "/api/memories/{memory_id}/history" in schema["paths"]
+    assert "/api/memories/{memory_id}/timeline" in schema["paths"]
     assert "/api/sessions/{session_id}/chat/stream" in schema["paths"]
     assert "/api/sessions/{session_id}/cancel" in schema["paths"]
     assert "/api/memories/undo" in schema["paths"]
@@ -124,6 +128,20 @@ def test_memory_supersede_keeps_history_and_hides_old_item(tmp_path: Path):
     history = store.memory_history(new["id"])
     assert history[0]["old_memory_id"] == old["id"]
     assert history[0]["reason"] == "用户明确改变偏好"
+
+
+def test_memory_timeline_returns_full_replacement_chain(tmp_path: Path):
+    store = Store(tmp_path / "timeline.db")
+    first = store.add_memory("用户喜欢红茶", "preference", 3, "test")
+    second = store.add_memory("用户喜欢绿茶", "preference", 3, "test", supersedes_id=first["id"], reason="偏好变化")
+    third = store.add_memory("用户喜欢乌龙茶", "preference", 3, "test", supersedes_id=second["id"], reason="再次变化")
+
+    timeline = store.memory_timeline(third["id"])
+
+    assert [item["id"] for item in timeline] == [first["id"], second["id"], third["id"]]
+    assert [item["status"] for item in timeline] == ["superseded", "superseded", "active"]
+    assert [item["replacement_reason"] for item in timeline] == [None, "偏好变化", "再次变化"]
+    assert store.memory_timeline("missing") == []
 
 
 def test_store_migrates_legacy_memory_schema(tmp_path: Path):

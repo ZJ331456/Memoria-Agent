@@ -122,6 +122,10 @@ class MemoryReplacementResponse(BaseModel):
     created_at: str
 
 
+class MemoryTimelineResponse(MemoryResponse):
+    replacement_reason: str | None = None
+
+
 class TraceResponse(BaseModel):
     id: str
     session_id: str
@@ -590,6 +594,11 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     def memory_history(memory_id: str):
         if not store.memory(memory_id): raise HTTPException(404, "记忆不存在")
         return store.memory_history(memory_id)
+
+    @app.get("/api/memories/{memory_id}/timeline", response_model=list[MemoryTimelineResponse], tags=["memories"], summary="查询完整记忆版本时间线")
+    def memory_timeline(memory_id: str):
+        if not store.memory(memory_id): raise HTTPException(404, "记忆不存在")
+        return store.memory_timeline(memory_id)
 
     @app.patch("/api/memories/{memory_id}", response_model=MemoryResponse, tags=["memories"], summary="编辑长期记忆")
     def update_memory(memory_id: str, body: MemoryPatch):
