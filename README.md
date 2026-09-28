@@ -106,6 +106,7 @@ timezone = "Asia/Shanghai"
 | [系统架构与实现说明.md](docs/系统架构与实现说明.md) | 模块边界与演进 |
 | [API接口文档.md](docs/API接口文档.md) | 端点、错误协议、示例 |
 | [项目规划说明书.md](docs/项目规划说明书.md) | 规划与对照 |
+| [五项目对照与第十二轮优化.md](docs/五项目对照与第十二轮优化.md) | 五个参考项目对照、长问题召回修复与后续优先级 |
 | [简历项目经历.md](docs/简历项目经历.md) | 简历用描述 |
 | [skills/README.md](skills/README.md) | 轻量 Skills 约定 |
 | [memoria/api/README.md](memoria/api/README.md) | API 包维护说明 |

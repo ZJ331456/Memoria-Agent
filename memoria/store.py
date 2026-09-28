@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -166,6 +167,8 @@ class Store:
         except sqlite3.OperationalError:
             self.db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(id UNINDEXED, content)")
             self.db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(id UNINDEXED, content)")
+        definition = self.db.execute("SELECT sql FROM sqlite_master WHERE name='memories_fts'").fetchone()
+        self._memory_fts_trigram = bool(definition and "trigram" in definition[0].lower())
         self.db.execute("INSERT INTO memories_fts(id,content) SELECT id,content FROM memories WHERE id NOT IN (SELECT id FROM memories_fts)")
         self.db.execute("INSERT INTO messages_fts(id,content) SELECT id,content FROM messages WHERE id NOT IN (SELECT id FROM messages_fts)")
 
@@ -583,8 +586,10 @@ class Store:
         return [dict(row) for row in rows]
 
     def keyword_memory_candidates(self, query: str, limit: int = 100) -> list[dict[str, Any]]:
+        if not query.strip() or limit <= 0:
+            return []
         with self.lock:
-            rows = []
+            rows: list[sqlite3.Row] = []
             try:
                 match = f'"{query.replace(chr(34), chr(34)*2)}"'
                 rows = self.db.execute("""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.id
@@ -592,9 +597,50 @@ class Store:
                     ORDER BY bm25(memories_fts),m.importance DESC LIMIT ?""", (match, limit)).fetchall()
             except sqlite3.OperationalError:
                 pass
+            # A full question rarely occurs verbatim in a stored fact. Search its
+            # indexable fragments as well, including when the exact phrase matched
+            # only a few rows. Keep exact matches first and deduplicate by ID.
+            terms = self._memory_search_terms(query)
+            if terms and len(rows) < limit:
+                match = " OR ".join(f'"{term}"' for term in terms)
+                try:
+                    fragments = self.db.execute("""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.id
+                        WHERE memories_fts MATCH ? AND m.status='active'
+                        ORDER BY bm25(memories_fts),m.importance DESC LIMIT ?""", (match, limit)).fetchall()
+                    seen = {row["id"] for row in rows}
+                    rows.extend(row for row in fragments if row["id"] not in seen)
+                except sqlite3.OperationalError:
+                    pass
+                if not self._memory_fts_trigram:
+                    # Older SQLite builds use the default FTS tokenizer, which
+                    # cannot match a Chinese three-character substring.
+                    where = " OR ".join("INSTR(lower(content), ?) > 0" for _ in terms)
+                    fragments = self.db.execute(
+                        f"SELECT * FROM memories WHERE status='active' AND ({where}) "
+                        "ORDER BY importance DESC, updated_at DESC LIMIT ?",
+                        (*terms, limit),
+                    ).fetchall()
+                    seen = {row["id"] for row in rows}
+                    rows.extend(row for row in fragments if row["id"] not in seen)
             if not rows:
                 rows = self.db.execute("SELECT * FROM memories WHERE status='active' AND content LIKE ? ORDER BY importance DESC LIMIT ?", (f"%{query}%", limit)).fetchall()
-        return [self._memory(dict(row)) for row in rows]
+        return [self._memory(dict(row)) for row in rows[:limit]]
+
+    @staticmethod
+    def _memory_search_terms(query: str) -> list[str]:
+        # Question endings describe the answer being requested, not the fact to
+        # find. Their trigrams can otherwise outrank a distinctive short clue.
+        query = re.sub(r"(?:是)?什么[？?!！。．.\s]*$", "", query)
+        terms: list[str] = []
+        for word in re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]+", query.lower()):
+            if len(word) < 3:
+                continue  # FTS5 trigram cannot index shorter fragments.
+            if "\u4e00" <= word[0] <= "\u9fff":
+                fragments = (word[index:index + 3] for index in range(len(word) - 2))
+            else:
+                fragments = (word,)
+            terms.extend(fragments)
+        return list(dict.fromkeys(terms))[:16]
 
     def enqueue_memory_job(self, source_ref: str, user_text: str, assistant_text: str) -> dict[str, Any]:
         timestamp, job_id = now(), uuid.uuid4().hex
