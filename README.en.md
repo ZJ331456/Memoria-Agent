@@ -1,0 +1,69 @@
+<p align="right"><a href="./README.md">简体中文</a> · <strong>English</strong></p>
+
+# Memoria Agent
+
+**A local personal agent whose memory you can inspect and correct.** Memoria uses long-term memory in conversation while keeping its sources, revisions, and user corrections visible.
+
+> Chat → extract memories → inspect sources and versions → correct or restore → use the current version in future conversations
+
+Memoria is built for local, single-user use. Conversations and memories are stored in local SQLite; model requests go to the OpenAI-compatible endpoint you configure.
+
+## What you can do
+
+- **Keep conversations going:** Persist multiple sessions, stream replies, stop generation, and summarize older context when needed.
+- **Build long-term memory:** Extract facts and preferences from conversations, then recall them with keyword search and optional vector search.
+- **Inspect and correct:** See a memory's source and full version history, save a correction with a reason, or restore content from an earlier version. Only the active version is recalled.
+- **Use tools:** Built-in tools cover memory, conversation search, calculation, and web retrieval. Tool Search exposes tools on demand, and MCP connects external services.
+- **See what happened:** The Dashboard shows memory jobs, tool calls, and runtime traces. Optional Drift runs selected skills while idle under configurable limits.
+
+## Quick start
+
+You need **Python 3.11+**, **Node.js/npm**, Git, and an OpenAI-compatible chat model endpoint. These commands target Linux/macOS; on Windows, use WSL.
+
+```bash
+git clone https://github.com/ZJ331456/Memoria-Agent.git
+cd Memoria-Agent
+
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+npm ci --prefix frontend
+npm run build --prefix frontend
+.venv/bin/python main.py
+```
+
+Open <http://127.0.0.1:2237>. On first launch, the Setup page asks for the main model's **Model, Base URL, and API Key**, and lets you test the connection. Fast and embedding models can be configured later. Without an embedding model, lexical memory retrieval still works.
+
+Model settings are saved in the Git-ignored `data/models.override.toml`; the API never echoes keys. You can also copy `config.example.toml` to `config.toml` and use environment variables for model and runtime settings.
+
+## Your first memory
+
+1. Tell Memoria a real preference or goal on the Chat page and finish a conversation.
+2. Open Memory to review the background extraction result. Search for a memory and choose **检查并纠正** (Inspect and correct).
+3. If it is inaccurate, edit the text and explain why. Saving makes a new version active while keeping the previous one in the timeline. **填入此版本** (Use this version) copies an older version into the form for you to review and restore.
+
+Memory also has three readable Markdown layers: `MEMORY.md` is generated from active memories, `SELF.md` can be edited by the user and injected into context, and `PENDING.md` holds pending candidates.
+
+## Optional capabilities
+
+To change runtime options, first run `cp config.example.toml config.toml`; restart the server after editing it.
+
+| Capability | How to enable it |
+| --- | --- |
+| Semantic retrieval | Configure an embedding model in Setup; run `.venv/bin/python -m pip install -r requirements-vector.txt` if you want the SQLite vector index |
+| MCP tools | Run `cp mcp_servers.example.json data/mcp_servers.json`, configure the servers you need, and reload them in the Dashboard |
+| Idle Drift | Set `enabled = true` under `[agent.drift]` in `config.toml`; it is off by default, with options for idle time, quiet hours, daily budget, and tool allowlists |
+| API access controls | Configure `api_token`, allowed origins, and rate limits under `[server.security]` in `config.toml` |
+
+Runtime data lives in `data/` by default, and the server listens on `127.0.0.1:2237`. Restart the server after upgrading dependencies.
+
+## Development and checks
+
+```bash
+.venv/bin/python -m pip install pytest
+.venv/bin/python -m pytest -q
+npm run build --prefix frontend
+(cd frontend && npx playwright install chromium)
+npm run test:e2e --prefix frontend
+```
+
+For frontend development, run `npm run dev --prefix frontend` in another terminal. Vite proxies `/api` to the local backend.

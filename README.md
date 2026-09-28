@@ -1,137 +1,69 @@
+<p align="right"><strong>简体中文</strong> · <a href="./README.en.md">English</a></p>
+
 # Memoria Agent
 
-可运行的个人 Agent：**对话 + 长期记忆 + 工具 / MCP + 空闲 Drift + 可观测 Dashboard**。
+**一个让你能检查并纠正记忆的本地个人 Agent。** 它会在对话中使用长期记忆，也把记忆的来源、变化和纠正过程交还给你。
 
-模型凭据写在被 Git 忽略的 `config.toml`（或 `data/models.override.toml`），HTTP API **永不回显密钥**，只返回是否已配置。
+> 对话 → 提取记忆 → 检查来源与版本 → 纠正或恢复 → 在后续对话中使用当前版本
 
-当前 API 版本：**0.10.0**（启动后见 `GET /api/health` 与 `/docs`）。
+Memoria 面向本地单用户使用。会话和记忆保存在本机 SQLite；模型请求发送到你配置的 OpenAI 兼容服务。
 
-## 快速启动
+## 你能做什么
+
+- **持续对话**：多会话保存、流式回复、停止生成，以及超出上下文窗口时的会话摘要。
+- **管理长期记忆**：从对话提取事实和偏好，结合关键词与可选的向量检索，在需要时召回。
+- **检查并纠正**：查看记忆来源和完整版本链，填写原因后生成纠正版；旧版本保留，也能从历史版本恢复。只有当前有效版本参与召回。
+- **使用工具**：内置记忆、历史搜索、计算和网页读取工具；Tool Search 按需暴露工具，MCP 可接入外部服务。
+- **了解运行过程**：Dashboard 展示记忆任务、工具调用和运行追踪；可选的 Drift 在空闲时按预算执行限定技能。
+
+## 快速开始
+
+需要 **Python 3.11+**、**Node.js/npm**、Git，以及一个 OpenAI 兼容的聊天模型接口。以下命令适用于 Linux/macOS；Windows 可使用 WSL。
 
 ```bash
+git clone https://github.com/ZJ331456/Memoria-Agent.git
 cd Memoria-Agent
-python -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cd frontend && npm install && npm run build && cd ..
-cp config.example.toml config.toml   # 填写 llm.*.api_key / base_url
+
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+npm ci --prefix frontend
+npm run build --prefix frontend
 .venv/bin/python main.py
 ```
 
-浏览器打开 [http://127.0.0.1:2237](http://127.0.0.1:2237)。
+打开 <http://127.0.0.1:2237>。首次进入会提示配置主模型的 **Model、Base URL 和 API Key**；可以在页面中测试连接。快速模型和 Embedding 模型可稍后配置。未配置 Embedding 时仍可使用词面记忆检索。
 
-| 场景 | 做法 |
-|---|---|
-| 前端热更新 | 另开终端 `cd frontend && npm run dev`（Vite 代理 `/api` → 2237） |
-| 向量 KNN | `.venv/bin/pip install -r requirements-vector.txt`；未装则自动 JSON 扫描 |
-| 自定义配置 | `python main.py --config /path/to/config.toml` |
-| 默认数据库 | `data/memoria.db` |
+模型设置保存在被 Git 忽略的 `data/models.override.toml`，API 不回显密钥。也可以复制 `config.example.toml` 为 `config.toml`，用环境变量配置模型和运行选项。
 
-改代码或升级依赖后请**重启** `main.py`，否则 Dashboard 可能仍是旧版本。
+## 第一次使用
 
-## 能力一览
+1. 在「对话」页告诉 Memoria 一项真实偏好或目标，完成一次对话。
+2. 到「记忆」页查看后台提取结果，搜索一条记忆并点击「检查并纠正」。
+3. 如果内容不准确，修改正文并写下原因；保存后，新版本生效，旧版本留在时间线中。点击历史版本的「填入此版本」，可在确认后恢复它。
 
-### 对话与运行时
+记忆还提供三层可读的 Markdown 视图：`MEMORY.md` 从有效记忆生成，`SELF.md` 可由用户编辑并注入上下文，`PENDING.md` 用于记录待处理候选。
 
-- 多会话 SQLite 持久化；OpenAI-compatible 主 / 快 / embedding 模型
-- 多步工具循环、写权限策略、循环保护、超时与输出截断
-- SSE 流式回复、停止生成、断连取消与 cancelled trace
-- Prompt Context Frame、会话压缩摘要、EventBus、同一步并行工具
+## 可选能力
 
-### 长期记忆
+需要修改运行选项时，先执行 `cp config.example.toml config.toml`；修改后重启服务。
 
-- 关键词 + 向量双路召回、RRF、FTS5、按类型限额注入
-- 强化 / supersede / 后台 consolidation（租约、重试、撤销）
-- Dashboard 可检查来源与完整版本链，填写原因后纠正记忆，或从历史版本恢复；旧版本保留
-- Markdown 真双层：`MEMORY.md`（投影）/ `SELF.md`（可编辑注入）/ `PENDING.md`（候选缓冲）
+| 能力 | 开启方式 |
+| --- | --- |
+| 语义检索 | 在「设置」中配置 Embedding 模型；需要 SQLite 向量索引时运行 `.venv/bin/python -m pip install -r requirements-vector.txt` |
+| MCP 工具 | 运行 `cp mcp_servers.example.json data/mcp_servers.json`，按需配置服务并在页面重载 |
+| 空闲 Drift | 在 `config.toml` 的 `[agent.drift]` 下设置 `enabled = true`；默认关闭，可设置空闲阈值、静默时段、日预算和工具白名单 |
+| API 访问限制 | 在 `config.toml` 的 `[server.security]` 下配置 `api_token`、允许的 Origin 和限流 |
 
-### 工具扩展
+运行数据默认位于 `data/`，服务默认只监听 `127.0.0.1:2237`。升级依赖后请重启服务。
 
-- 内置：`recall_memory`、`memorize`、`forget_memory`、`search_history`、`current_time`、`calculate`、`load_skill`、`http_get`
-- **Tool Search**：非 `always_on` 工具经 `tool_search` + `tool_call` 按需暴露，避免撑爆上下文（`[agent.tools].search_enabled`）
-- **MCP**：stdio JSON-RPC，配置 `data/mcp_servers.json`（示例见根目录 `mcp_servers.example.json`）
-
-### 空闲自动化
-
-- **Drift**：无人对话时按预算跑限定技能（默认 `drift-digest` / `memory-review`）
-- 静默小时、空闲阈值、日预算、写工具白名单；审计表 `drift_runs`
-- 同技能读取上次已完成运行的摘要作为接续参考
-- 配置：`[agent.drift]`（见 `config.example.toml`）
-
-### Dashboard / 安全
-
-- 对话、记忆、追踪（含 Drift）、工具实验台（含 MCP）、Setup 向导
-- 可选 API Token、Origin、限流、请求体上限、Prometheus `/metrics`
-
-## MCP（可选）
-
-依赖：Node/`npx`，以及 [uv](https://docs.astral.sh/uv/) 的 `uvx`。
+## 开发与验证
 
 ```bash
-cp mcp_servers.example.json data/mcp_servers.json
-# 把 filesystem / git 路径改成绝对路径后重启，或 POST /api/mcp/reload
+.venv/bin/python -m pip install pytest
+.venv/bin/python -m pytest -q
+npm run build --prefix frontend
+(cd frontend && npx playwright install chromium)
+npm run test:e2e --prefix frontend
 ```
 
-| Server | 命令 | 用途 |
-|---|---|---|
-| filesystem | `npx -y @modelcontextprotocol/server-filesystem <沙箱目录>` | 沙箱读写 |
-| fetch | `uvx mcp-server-fetch` | 网页转文本 |
-| time | `uvx mcp-server-time` | 时区时间 |
-| thinking | `npx -y @modelcontextprotocol/server-sequential-thinking` | 分步推理 |
-| git | `uvx mcp-server-git --repository <repo>` | 只读 git（示例已限制工具） |
-
-本地工具名形如 `mcp_{server}_{tool}`；默认走 Tool Search，不直连塞满 schema。
-
-## Drift（可选）
-
-在 `config.toml` 中：
-
-```toml
-[agent.drift]
-enabled = true
-min_idle_seconds = 300
-interval_seconds = 10800
-max_steps = 8
-daily_budget = 6
-quiet_hours = [0, 1, 2, 3, 4, 5, 6]
-allowed_skills = ["drift-digest", "memory-review"]
-allow_write_tools = ["memorize"]   # 不要放 forget_memory
-timezone = "Asia/Shanghai"
-```
-
-- 状态 / 手动触发：`GET /api/drift`、`POST /api/drift/run`（`{"force": true}` 可跳过空闲/预算，仍不与用户对话并发）
-- Dashboard「追踪」页可查看并手动跑一轮
-
-## 文档索引
-
-| 文档 | 内容 |
-|---|---|
-| [系统架构与实现说明.md](docs/系统架构与实现说明.md) | 模块边界与演进 |
-| [API接口文档.md](docs/API接口文档.md) | 端点、错误协议、示例 |
-| [项目规划说明书.md](docs/项目规划说明书.md) | 规划与对照 |
-| [五项目对照与第十二轮优化.md](docs/五项目对照与第十二轮优化.md) | 五个参考项目对照、长问题召回修复与后续优先级 |
-| [前后端优化与记忆时间线.md](docs/前后端优化与记忆时间线.md) | 前后端审计、界面改版及 Akashic/Claude-Mem 机制落地 |
-| [Holt 对照与可纠正记忆.md](docs/Holt对照与可纠正记忆.md) | Holt 思想对照、用户纠正链路及行为边界 |
-| [简历项目经历.md](docs/简历项目经历.md) | 简历用描述 |
-| [skills/README.md](skills/README.md) | 轻量 Skills 约定 |
-| [memoria/api/README.md](memoria/api/README.md) | API 包维护说明 |
-
-**分轮实现说明**
-
-- [第五轮：九项落地](docs/核心优化审计-第五轮-九项落地.md) · [第六轮：生产化](docs/核心优化审计-第六轮-生产化九项.md)
-- [第七轮：Akashic 运行时](docs/核心优化审计-第七轮-Akashic运行时提炼.md) · [第八轮：Skills](docs/核心优化审计-第八轮-轻量Skills.md)
-- [第九轮：Markdown + Setup](docs/核心优化审计-第九轮-Markdown双层与Setup.md)
-- [第十轮：Tool Search + MCP](docs/核心优化审计-第十轮-ToolSearch与MCP.md)
-- [第十一轮：Drift](docs/核心优化审计-第十一轮-Drift空闲任务.md)
-
-交互式 Swagger：服务启动后访问 `/docs`。
-
-## 开发与验收
-
-```bash
-python -m pytest -q
-cd frontend && npm run build
-# 可选浏览器回归
-cd frontend && npm run test:e2e
-```
-
-主要目录：`memoria/`（后端）、`frontend/`（Dashboard）、`skills/`（SKILL.md）、`data/`（本地运行时，默认不进 Git）、`docs/`（说明与审计）。
+前端开发可另开终端运行 `npm run dev --prefix frontend`，Vite 会将 `/api` 代理到本地后端。
