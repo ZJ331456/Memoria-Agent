@@ -67,3 +67,13 @@ npm run test:e2e --prefix frontend
 ```
 
 前端开发可另开终端运行 `npm run dev --prefix frontend`，Vite 会将 `/api` 代理到本地后端。
+
+## Related Projects
+
+以下开源项目为 Memoria-Agent 的设计提供了参考；Memoria-Agent 是独立实现。
+
+- [Pask](https://github.com/xzf-thu/Pask) — 主动式 Agent 与分层长期记忆。
+- [akashic-agent](https://github.com/kachofugetsu09/akashic-agent) — Agent 运行时、记忆层与后台任务。
+- [claude-mem](https://github.com/thedotmack/claude-mem) — 会话记录、压缩与跨会话上下文召回。
+- [Holt](https://github.com/holt-os/holt) — 可查看来源的个人 Agent 记忆。
+- [Mem0](https://github.com/mem0ai/mem0) — 面向 Agent 的记忆存储与检索。

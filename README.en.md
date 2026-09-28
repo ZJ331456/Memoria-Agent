@@ -67,3 +67,13 @@ npm run test:e2e --prefix frontend
 ```
 
 For frontend development, run `npm run dev --prefix frontend` in another terminal. Vite proxies `/api` to the local backend.
+
+## Related Projects
+
+These open-source projects informed parts of Memoria-Agent's design. Memoria-Agent is an independent implementation.
+
+- [Pask](https://github.com/xzf-thu/Pask) — Proactive agents and hierarchical long-term memory.
+- [akashic-agent](https://github.com/kachofugetsu09/akashic-agent) — Agent runtime, memory layers, and background jobs.
+- [claude-mem](https://github.com/thedotmack/claude-mem) — Session capture, compression, and context recall across sessions.
+- [Holt](https://github.com/holt-os/holt) — Personal agent memory with visible sources.
+- [Mem0](https://github.com/mem0ai/mem0) — Memory storage and retrieval for agents.
