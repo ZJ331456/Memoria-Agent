@@ -30,19 +30,7 @@ class MemoryJobWorker:
         heartbeat = asyncio.create_task(self._heartbeat(job["id"]))
         try:
             extracted = await self.llm.extract_memories(job["user_text"], job["assistant_text"])
-            for item in extracted:
-                if not self.store.renew_memory_job(job["id"], self.owner, self.lease_seconds):
-                    raise RuntimeError("memory job lease lost before write")
-                content = str(item["content"])
-                kind = str(item.get("kind", "fact"))
-                if self.memory.markdown and self.memory.markdown.enabled:
-                    self.memory.markdown.append_pending(
-                        source_ref=job["source_ref"], content=content, kind=kind,
-                    )
-                await self.memory.add_if_new(
-                    content, kind, int(item.get("importance", 3)),
-                    "conversation", job["source_ref"],
-                )
+            self.store.stage_memory_reviews(job["id"], self.owner, extracted)
             self.store.finish_memory_job(job["id"], owner=self.owner, max_retries=self.max_retries, backoff_seconds=self.backoff_seconds)
         except asyncio.CancelledError:
             self.store.finish_memory_job(job["id"], "worker cancelled", self.owner, self.max_retries, self.backoff_seconds)

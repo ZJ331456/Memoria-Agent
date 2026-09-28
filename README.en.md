@@ -4,15 +4,15 @@
 
 **A local personal agent whose memory you can inspect and correct.** Memoria uses long-term memory in conversation while keeping its sources, revisions, and user corrections visible.
 
-> Chat → extract memories → inspect sources and versions → correct or restore → use the current version in future conversations
+> Chat → extract candidates → inspect the original message and review → correct or restore → use the current version in future conversations
 
 Memoria is built for local, single-user use. Conversations and memories are stored in local SQLite; model requests go to the OpenAI-compatible endpoint you configure.
 
 ## What you can do
 
 - **Keep conversations going:** Persist multiple sessions, stream replies, stop generation, and summarize older context when needed.
-- **Build long-term memory:** Extract facts and preferences from conversations, then recall them with keyword search and optional vector search.
-- **Inspect and correct:** See a memory's source and full version history, save a correction with a reason, or restore content from an earlier version. Only the active version is recalled.
+- **Review long-term memory:** Extracted facts and preferences enter a review queue first. Open the original message, edit a candidate, then approve or reject it. Pending candidates never enter recall.
+- **Inspect and correct:** Follow a source ID back to the original conversation, inspect the version history, save a correction with a reason, or restore an earlier version. Only the active version is recalled.
 - **Use tools:** Built-in tools cover memory, conversation search, calculation, and web retrieval. Tool Search exposes tools on demand, and MCP connects external services.
 - **See what happened:** The Dashboard shows memory jobs, tool calls, and runtime traces. Optional Drift runs selected skills while idle under configurable limits.
 
@@ -38,10 +38,10 @@ Model settings are saved in the Git-ignored `data/models.override.toml`; the API
 ## Your first memory
 
 1. Tell Memoria a real preference or goal on the Chat page and finish a conversation.
-2. Open Memory to review the background extraction result. Search for a memory and choose **检查并纠正** (Inspect and correct).
-3. If it is inaccurate, edit the text and explain why. Saving makes a new version active while keeping the previous one in the timeline. **填入此版本** (Use this version) copies an older version into the form for you to review and restore.
+2. Open Memory → **自动记忆审核** (Automatic memory review). Use **查看原始对话** (View original conversation) to check context, then edit and approve the candidate or reject it.
+3. Approved items enter the active memory library. Choose **检查并纠正** (Inspect and correct) to see the source and versions; a correction makes a new version active while retaining the old one.
 
-Memory also has three readable Markdown layers: `MEMORY.md` is generated from active memories, `SELF.md` can be edited by the user and injected into context, and `PENDING.md` holds pending candidates.
+Memory also has readable Markdown views: `MEMORY.md` is generated from active memories, and `SELF.md` can be edited by the user and injected into context. The older `PENDING.md` remains readable; SQLite is the source of truth for the new review queue.
 
 ## Optional capabilities
 

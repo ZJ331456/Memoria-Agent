@@ -2,7 +2,7 @@
 
 ## 1. 文档范围
 
-本文描述 Memoria Agent `0.10.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
+本文描述 Memoria Agent `0.11.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
 
 - 默认地址：`http://127.0.0.1:2237`
 - API 前缀：`/api`
@@ -48,7 +48,7 @@
 最小存活检查，不访问模型。
 
 ```json
-{"status":"ok","version":"0.10.0"}
+{"status":"ok","version":"0.11.0"}
 ```
 
 ### `GET /api/overview`
@@ -83,9 +83,13 @@
 
 请求 `{"title":"新标题"}`，用于重命名会话。
 
-### `GET /api/sessions/{session_id}/messages?limit=100`
+### `GET /api/sessions/{session_id}/messages?limit=100&anchor_id=`
 
-返回按时间正序排列的消息。`limit` 范围 1–1000。
+不提供 `anchor_id` 时返回最近消息；提供该会话的消息 ID 时，返回该消息前后的上下文（含原消息），即使它不在最近 100 条中。`limit` 范围 1–1000；来源不属于会话或已删除时返回 404。
+
+### `GET /api/messages/{message_id}/source`
+
+按来源消息 ID 返回所属 `session_id`、会话标题、角色、原文和时间。原始消息或会话已删除时返回 404。前端据此进入会话，再用 `anchor_id` 定位并高亮原文。
 
 ### `DELETE /api/sessions/{session_id}`
 
@@ -173,7 +177,25 @@ embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余�
 
 ### `GET /api/memory-jobs?limit=50`
 
-查询后台抽取与 consolidation 任务，返回来源消息、状态、尝试次数、下次可用时间和租约信息。
+查询后台抽取任务，返回来源消息、状态、尝试次数、下次可用时间和租约信息。`completed` 表示提取已完成，候选仍需审核。
+
+### `GET /api/memory-reviews?status=pending&limit=100`
+
+返回自动提取的候选记忆。`status` 可为 `pending`、`approved`、`rejected`、`all`，默认只返回待审核项；`limit` 范围 1–500。每项带 `source_ref`（原始用户消息 ID）、候选正文、类型、重要度、审核状态和处理后的记忆 ID / 动作。待审核候选不参与对话召回。
+
+### `POST /api/memory-reviews/{review_id}/approve`
+
+批准前可修正候选，请求示例：
+
+```json
+{"content":"用户现在喜欢乌龙茶","kind":"preference","importance":4}
+```
+
+批准时走与手动写入相同的去重、强化和替代逻辑；用户明确批准可替代之前的纠正版本。响应 `status=approved` 并返回 `applied_memory_id`、`applied_action`（可能为 `created`、`reinforced`、`superseded` 或重复来源的 `skipped`）。空白或不合法字段返回 422；候选已处理返回 409；写入失败时恢复待审核并返回 502。重试和进程重启不会让同一候选重复入队。
+
+### `POST /api/memory-reviews/{review_id}/reject`
+
+拒绝待审核候选，不写入长期记忆；重复处理返回 409。审核队列记录保留，可通过 `status=all` 查看结果。
 
 ### `POST /api/memory-jobs/{job_id}/retry`
 
@@ -292,7 +314,7 @@ curl -s "$BASE/api/traces?session_id=$SESSION"
 | 前端功能 | 使用 API |
 |---|---|
 | 对话实验室 | sessions、messages、chat/stream、cancel |
-| 长期记忆 | memories GET/POST/PATCH/DELETE/correct/timeline/reindex/undo、memory-jobs |
+| 长期记忆 | memories GET/POST/PATCH/DELETE/correct/timeline/reindex/undo、memory-reviews、memory-jobs、message source |
 | 运行追踪 | overview、traces |
 | 工具实验台 | tools、tools execute |
 

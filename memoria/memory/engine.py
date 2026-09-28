@@ -181,7 +181,7 @@ class MemoryEngine:
             target_id = decision.get("target_id", "")
             target = next((item for item in related if item["id"] == target_id), None)
             action = decision.get("action", "create")
-            if target and target.get("source") == "user_correction" and source != "manual" and action == "supersede":
+            if target and target.get("source") == "user_correction" and source not in {"manual", "reviewed_conversation"} and action == "supersede":
                 return MemoryWriteResult("skipped", target, target_id, "user correction requires explicit review")
             if target and action == "reinforce" and float(target["relation_similarity"]) >= 0.78:
                 if source_ref and self.store.has_memory_operation(source_ref, target_id):

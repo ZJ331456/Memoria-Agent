@@ -182,6 +182,36 @@ class MemoryJobResponse(BaseModel):
     updated_at: str
 
 
+class MemoryReviewResponse(BaseModel):
+    id: str
+    job_id: str
+    source_ref: str
+    ordinal: int
+    content: str
+    kind: MemoryKind
+    importance: int
+    status: Literal["pending", "applying", "approved", "rejected"]
+    applied_memory_id: str | None = None
+    applied_action: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class MemoryReviewApproval(StrictModel):
+    content: str = Field(min_length=1, max_length=4000)
+    kind: MemoryKind
+    importance: int = Field(ge=1, le=5)
+
+
+class MessageSourceResponse(BaseModel):
+    message_id: str
+    session_id: str
+    session_title: str
+    role: str
+    content: str
+    created_at: str
+
+
 class ToolExecuteBody(StrictModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     confirm_write: bool = False
@@ -204,7 +234,7 @@ class DriftRunBody(StrictModel):
     force: bool = False
 
 
-VERSION = "0.10.0"
+VERSION = "0.11.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
     {"name": "setup", "description": "模型热配置、连通性测试与 Setup 向导。"},
@@ -474,9 +504,19 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return item
 
     @app.get("/api/sessions/{session_id}/messages", response_model=list[MessageResponse], tags=["sessions"], summary="获取会话消息")
-    def messages(session_id: str, limit: int = Query(default=100, ge=1, le=1000)):
+    def messages(session_id: str, limit: int = Query(default=100, ge=1, le=1000), anchor_id: str = ""):
         if not store.session(session_id): raise HTTPException(404, "会话不存在")
-        return store.messages(session_id, limit)
+        if anchor_id:
+            source = store.message_source(anchor_id)
+            if not source or source["session_id"] != session_id:
+                raise HTTPException(404, "来源消息不属于该会话或已删除")
+        return store.messages(session_id, limit, anchor_id or None)
+
+    @app.get("/api/messages/{message_id}/source", response_model=MessageSourceResponse, tags=["sessions"], summary="按来源 ID 定位原始消息")
+    def message_source(message_id: str):
+        item = store.message_source(message_id)
+        if not item: raise HTTPException(404, "来源消息不存在，可能已删除")
+        return item
 
     @app.post("/api/sessions/{session_id}/chat", response_model=ChatResponse, tags=["agent"], summary="执行一轮 Agent 对话")
     async def chat(session_id: str, body: ChatBody, request: Request):
@@ -585,6 +625,33 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.get("/api/memory-jobs", response_model=list[MemoryJobResponse], tags=["memories"], summary="查询后台记忆任务")
     def memory_jobs(limit: int = Query(default=50, ge=1, le=200)):
         return store.memory_jobs(limit)
+
+    @app.get("/api/memory-reviews", response_model=list[MemoryReviewResponse], tags=["memories"], summary="查询自动提取记忆审核队列")
+    def memory_reviews(status: Literal["pending", "approved", "rejected", "all"] = "pending", limit: int = Query(default=100, ge=1, le=500)):
+        return store.memory_reviews(status, limit)
+
+    @app.post("/api/memory-reviews/{review_id}/approve", response_model=MemoryReviewResponse, tags=["memories"], summary="批准并写入候选记忆")
+    async def approve_memory_review(review_id: str, body: MemoryReviewApproval):
+        if not body.content.strip(): raise HTTPException(422, "记忆内容不能为空")
+        if not store.memory_review(review_id): raise HTTPException(404, "候选记忆不存在")
+        review = store.claim_memory_review(review_id, body.content, body.kind, body.importance)
+        if not review: raise HTTPException(409, "候选记忆已处理，请刷新审核队列")
+        try:
+            result = await service.runtime.memory.remember(
+                body.content, body.kind, body.importance, "reviewed_conversation", review["source_ref"],
+            )
+            store.finish_memory_review(review_id, result.memory["id"] if result.memory else None, result.action)
+        except BaseException as exc:
+            store.reset_memory_review(review_id)
+            if isinstance(exc, asyncio.CancelledError): raise
+            raise HTTPException(502, "记忆写入失败，候选项已恢复待审核状态") from exc
+        return store.memory_review(review_id)
+
+    @app.post("/api/memory-reviews/{review_id}/reject", response_model=MemoryReviewResponse, tags=["memories"], summary="拒绝候选记忆")
+    def reject_memory_review(review_id: str):
+        if not store.memory_review(review_id): raise HTTPException(404, "候选记忆不存在")
+        if not store.reject_memory_review(review_id): raise HTTPException(409, "候选记忆已处理，请刷新审核队列")
+        return store.memory_review(review_id)
 
     @app.post("/api/memory-jobs/{job_id}/retry", response_model=MemoryJobResponse, tags=["memories"], summary="重试失败的记忆任务")
     def retry_memory_job(job_id: str):

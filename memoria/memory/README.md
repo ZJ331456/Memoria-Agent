@@ -2,7 +2,7 @@
 
 ## 1. 模块职责
 
-`memory` 位于 Runtime 与 SQLite Store 之间，统一负责记忆写入、去重、向量生成、历史数据回填、检索和排序。聊天自动提取、HTTP API、`recall_memory` 和 `memorize` 工具均使用同一个 `MemoryEngine`，不能绕过该层直接形成记忆。
+`memory` 位于 Runtime 与 SQLite Store 之间，统一负责记忆写入、去重、向量生成、历史数据回填、检索和排序。聊天自动提取先由 worker 存入 SQLite 审核队列；用户批准后才调用 `MemoryEngine` 写入。手动 HTTP API、`recall_memory` 和 `memorize` 工具仍使用该引擎。
 
 ## 2. 文件说明
 
@@ -11,7 +11,7 @@
 | `embedding.py` | 调用 OpenAI-compatible `/embeddings`，处理分批、超时、重试和响应校验 |
 | `engine.py` | 强化/创建/替代决策、FTS/关键词/余弦召回、RRF 融合与类型限额 |
 | `planner.py` | 召回门控、query rewrite、类型与数量计划 |
-| `worker.py` | 持久化后台抽取、重试、consolidation 与来源关联 |
+| `worker.py` | 持久化后台抽取、重试、候选审核入队与来源关联 |
 | `__init__.py` | 对外暴露记忆模块的稳定接口 |
 | `../vector_index.py` | 可选 sqlite-vec cosine KNN 索引与 JSON 降级边界 |
 | `../store.py` | 保存正文、JSON 向量、FTS、任务租约、版本和来源，执行 schema 迁移 |
@@ -30,7 +30,7 @@
 
 `reinforce` 只更新已有条目的 `reinforcement`、`last_reinforced_at` 和 `updated_at`。`supersede` 只允许用于 preference、profile、goal、procedure；新条目指向 `supersedes_id`，旧条目标记为 `superseded`，`memory_replacements` 保存新旧正文快照、原因和时间。模型无效输出、目标越界或服务失败时保守选择 `create`，不会自动退休旧信息。
 
-embedding 未配置或暂时失败时，写入仍可执行规范文本强化及关键词候选判断，不会让主对话失败。手动 API 和 Agent 工具返回结构化的 `created/reinforced/superseded` 动作；自动提取由后台任务完成，`source_ref` 操作账本确保重试不会重复强化。
+embedding 未配置或暂时失败时，写入仍可执行规范文本强化及关键词候选判断，不会让主对话失败。手动 API 和 Agent 工具返回结构化的 `created/reinforced/superseded` 动作；自动提取只形成 `memory_reviews` 候选。批准后使用来源消息 ID 作为 `source_ref` 调用引擎，操作账本防止重试重复强化。
 
 ## 4. 检索流程
 
@@ -69,4 +69,8 @@ base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 ## 8. 后台任务与撤销
 
-主回复完成后以用户消息 ID 作为 `source_ref` 幂等入队。worker 原子领取租约并续租，失败按配置指数退避；达到上限后可通过前端或 retry API 手动恢复。`POST /api/memories/undo` 可先 dry-run，再停用该来源产生的记忆并恢复旧版本。
+主回复完成后以用户消息 ID 作为 `source_ref` 幂等入队。worker 原子领取租约并续租，失败按配置指数退避；达到上限后可通过前端或 retry API 手动恢复。提取结果写入带 `(job_id, ordinal)` 唯一约束的审核队列，重复领取不会覆盖已有审核结果。待审核候选不参与检索、Markdown 投影或模型上下文。
+
+用户可修改候选正文、类型和重要度后批准，或直接拒绝。批准时先将候选标记为 `applying`，调用记忆引擎，再记录 `approved` 和实际写入动作；失败恢复为 `pending`，进程重启时也会回收未完成的 `applying`。`POST /api/memories/undo` 可先 dry-run，再停用已批准来源产生的有效记忆并恢复旧版本。
+
+`source_ref` 对应原始用户消息 ID。`GET /api/messages/{message_id}/source` 定位会话，`GET /api/sessions/{session_id}/messages?anchor_id=...` 读取该消息附近的上下文；原会话被删除后来源链接返回 404。旧版 `PENDING.md` 保留为可读层，新审核队列以 SQLite 为准。

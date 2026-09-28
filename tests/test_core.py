@@ -93,6 +93,11 @@ def test_automatic_supersede_does_not_replace_user_correction(tmp_path: Path):
     ))
     assert result.action == "skipped"
     assert [item["id"] for item in store.memories()] == [corrected["id"]]
+    reviewed = asyncio.run(MemoryEngine(store, decider=decide).remember(
+        "用户喜欢乌龙茶饮品", "preference", 3, "reviewed_conversation", "message-1",
+    ))
+    assert reviewed.action == "superseded"
+    assert reviewed.memory["supersedes_id"] == corrected["id"]
     store.close()
 
 
@@ -101,7 +106,7 @@ def test_openapi_and_tool_debug(tmp_path: Path):
     config.write_text(f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n[storage]\ndatabase="{tmp_path / 'api.db'}"\n''', encoding="utf-8")
     client = TestClient(create_app(config))
     schema = client.get("/openapi.json").json()
-    assert schema["info"]["version"] == "0.10.0"
+    assert schema["info"]["version"] == "0.11.0"
     assert "/api/tools/{tool_name}/execute" in schema["paths"]
     assert "/api/memories/reindex" in schema["paths"]
     assert "/api/memories/{memory_id}/history" in schema["paths"]

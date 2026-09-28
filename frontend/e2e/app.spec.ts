@@ -1,7 +1,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 
 const session={id:'session-1',title:'E2E 会话',created_at:'2026-07-23T00:00:00Z',updated_at:'2026-07-23T00:00:00Z',message_count:0}
-const memory={id:'memory-1',content:'现在喜欢乌龙茶',kind:'preference',importance:4,source:'conversation',created_at:'2026-07-23T00:00:00Z',updated_at:'2026-07-23T00:00:00Z',status:'active',reinforcement:1,supersedes_id:'memory-0',last_reinforced_at:null}
+const memory={id:'memory-1',content:'现在喜欢乌龙茶',kind:'preference',importance:4,source:'conversation',source_ref:'source-1',created_at:'2026-07-23T00:00:00Z',updated_at:'2026-07-23T00:00:00Z',status:'active',reinforcement:1,supersedes_id:'memory-0',last_reinforced_at:null}
 const jobs=[
  {id:'failed-job',source_ref:'source-failed-123',status:'failed',attempts:3,error:'provider unavailable',available_at:'2026-07-23T00:00:00Z',lease_owner:null,lease_expires_at:null,created_at:'2026-07-23T00:00:00Z',updated_at:'2026-07-23T00:00:00Z'},
  {id:'completed-job',source_ref:'source-complete-456',status:'completed',attempts:1,error:null,available_at:'2026-07-23T00:00:00Z',lease_owner:null,lease_expires_at:null,created_at:'2026-07-23T00:00:00Z',updated_at:'2026-07-23T00:00:00Z'},
@@ -16,7 +16,8 @@ async function mockApi(page:Page){
    chatCompleted=true
    return route.fulfill({status:200,contentType:'text/event-stream',body:'data: {"type":"delta","content":"流式回复"}\n\ndata: {"type":"complete"}\n\n'})
   }
-  if(path==='/api/sessions/session-1/messages')return json(chatCompleted?[{id:'assistant-1',session_id:'session-1',role:'assistant',content:'流式回复',created_at:'2026-07-23T00:00:01Z'}]:[])
+  if(path==='/api/sessions/session-1/messages')return json(url.searchParams.has('anchor_id')?[{id:'source-1',session_id:'session-1',role:'user',content:'原始偏好：喜欢红茶',created_at:'2026-07-23T00:00:00Z'}]:chatCompleted?[{id:'assistant-1',session_id:'session-1',role:'assistant',content:'流式回复',created_at:'2026-07-23T00:00:01Z'}]:[])
+  if(path==='/api/messages/source-1/source')return json({message_id:'source-1',session_id:'session-1',session_title:'E2E 会话',role:'user',content:'原始偏好：喜欢红茶',created_at:'2026-07-23T00:00:00Z'})
   if(path==='/api/sessions')return json([session])
   if(path==='/api/memories/memory-1/timeline')return json([{...memory,id:'memory-0',content:'以前喜欢红茶',status:'superseded',supersedes_id:null,replacement_reason:null}, {...memory,replacement_reason:'偏好发生变化'}])
   if(path==='/api/memories')return json([memory])
@@ -24,6 +25,7 @@ async function mockApi(page:Page){
   if(path==='/api/setup/status')return json({main:{model:'mock',base_url:'',configured:true},fast:{model:'',base_url:'',configured:false},embedding:{model:'',base_url:'',configured:false},setup_needed:false})
   if(path==='/api/memory-jobs/failed-job/retry')return json({...jobs[0],status:'pending',attempts:0,error:null})
   if(path==='/api/memory-jobs')return json(jobs)
+  if(path==='/api/memory-reviews')return json([])
   if(path==='/api/memories/undo')return json({affected_ids:['memory-1'],restored_ids:['memory-old']})
   if(path==='/api/traces')return json([])
   if(path==='/api/overview')return json({sessions:1,messages:0,memories:0,memories_superseded:0,traces:0,memory_jobs_pending:0,memory_jobs_failed:1,models:{},tools:[],pipeline:{}})
@@ -82,6 +84,27 @@ test('memory correction creates a visible version with a reason',async({page})=>
  await expect(page.getByText('记忆已纠正，旧版本保留在时间线中')).toBeVisible()
  await expect(page.getByTestId('memory-timeline')).toContainText('用户更正')
  await expect(page.getByTestId('memory-timeline')).toContainText('现在喜欢普洱茶')
+})
+
+test('review candidates stay in queue until approved and source opens the original message',async({page})=>{
+ const review={id:'review-1',job_id:'completed-job',source_ref:'source-1',ordinal:0,content:'可能喜欢红茶',kind:'preference',importance:3,status:'pending',applied_memory_id:null,applied_action:null,created_at:'2026-07-23T00:00:00Z',updated_at:'2026-07-23T00:00:00Z'}
+ let pending=[review]
+ await page.route('**/api/memory-reviews?*',route=>route.fulfill({contentType:'application/json',body:JSON.stringify(pending)}))
+ await page.route('**/api/memory-reviews/review-1/approve',async route=>{
+  pending=[]
+  await route.fulfill({contentType:'application/json',body:JSON.stringify({...review,status:'approved',applied_action:'created',applied_memory_id:'memory-2'})})
+ })
+ await page.reload()
+ await page.getByRole('tab',{name:'记忆'}).click()
+ await expect(page.getByTestId('memory-review-item')).toHaveCount(1)
+ await page.getByTestId('memory-review-item').getByRole('button',{name:'来源 ID：source-1'}).click()
+ await expect(page.getByText('原始偏好：喜欢红茶')).toBeVisible()
+ await expect(page.locator('[data-focused="true"]')).toHaveCount(1)
+ await page.getByRole('tab',{name:'记忆'}).click()
+ await page.getByTestId('memory-review-item').getByLabel('候选内容').fill('现在喜欢乌龙茶')
+ await page.getByRole('button',{name:'批准并写入'}).click()
+ await expect(page.getByTestId('memory-review-item')).toHaveCount(0)
+ await expect(page.getByText(/候选记忆已批准/)).toBeVisible()
 })
 
 test('a failed setup request does not hide conversations',async({page})=>{

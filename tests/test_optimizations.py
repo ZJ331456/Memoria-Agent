@@ -98,7 +98,31 @@ def test_memory_worker_processes_durable_job(tmp_path: Path):
     worker = MemoryJobWorker(store, FakeLLM(), MemoryEngine(store))
     assert asyncio.run(worker.process_once())
     assert store.memory_jobs()[0]["status"] == "completed"
-    assert store.memories()[0]["source_ref"] == "message-worker"
+    assert store.memories() == []
+    reviews = store.memory_reviews()
+    assert len(reviews) == 1 and reviews[0]["source_ref"] == "message-worker"
+    assert reviews[0]["status"] == "pending"
+
+
+def test_memory_review_staging_is_idempotent_and_decisions_are_final(tmp_path: Path):
+    store = Store(tmp_path / "reviews.db")
+    job = store.enqueue_memory_job("source-1", "u", "a")
+    store.claim_memory_job("review-worker")
+    candidates = [
+        {"content": "喜欢乌龙茶", "kind": "preference", "importance": 4},
+        {"content": "目标是跑步", "kind": "goal", "importance": 3},
+    ]
+    first = store.stage_memory_reviews(job["id"], "review-worker", candidates)
+    assert len(first) == 2 and store.memories() == []
+    assert store.reject_memory_review(first[1]["id"])
+    second = store.stage_memory_reviews(job["id"], "review-worker", candidates)
+    assert [item["id"] for item in second] == [item["id"] for item in first]
+    assert second[1]["status"] == "rejected"
+    assert store.claim_memory_review(first[0]["id"], "喜欢乌龙茶和普洱茶", "preference", 5)
+    assert not store.claim_memory_review(first[0]["id"], "再次批准", "preference", 5)
+    assert store.finish_memory_review(first[0]["id"], "memory-1", "created")
+    assert store.memory_reviews() == []
+    assert store.memory_reviews("all")[0]["status"] == "approved"
 
 
 def test_sse_chat_endpoint_emits_delta_and_complete(tmp_path: Path):

@@ -69,6 +69,15 @@ class Store:
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_memory_jobs_status ON memory_jobs(status, created_at);
+                CREATE TABLE IF NOT EXISTS memory_reviews (
+                    id TEXT PRIMARY KEY, job_id TEXT NOT NULL, source_ref TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL, content TEXT NOT NULL, kind TEXT NOT NULL,
+                    importance INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+                    applied_memory_id TEXT, applied_action TEXT,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    UNIQUE(job_id, ordinal)
+                );
+                CREATE INDEX IF NOT EXISTS idx_memory_reviews_status ON memory_reviews(status, created_at);
                 CREATE TABLE IF NOT EXISTS turn_traces (
                     id TEXT PRIMARY KEY, session_id TEXT NOT NULL, status TEXT NOT NULL,
                     steps INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
@@ -132,6 +141,7 @@ class Store:
                     self.db.execute(statement)
             self.db.execute("UPDATE memory_jobs SET available_at=COALESCE(available_at,created_at)")
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_memory_jobs_available ON memory_jobs(status, available_at, lease_expires_at)")
+            self.db.execute("UPDATE memory_reviews SET status='pending' WHERE status='applying'")
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status, updated_at DESC)")
             self._init_fts()
             self.vector_index = SQLiteVecIndex(self.db, vector_backend)
@@ -204,10 +214,24 @@ class Store:
             row = self.db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
         return dict(row) if row else None
 
-    def messages(self, session_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def messages(self, session_id: str, limit: int = 100, anchor_id: str | None = None) -> list[dict[str, Any]]:
         with self.lock:
+            if anchor_id:
+                anchor = self.db.execute("SELECT rowid FROM messages WHERE id=? AND session_id=?", (anchor_id, session_id)).fetchone()
+                if not anchor:
+                    return []
+                before = self.db.execute("SELECT * FROM messages WHERE session_id=? AND rowid<=? ORDER BY rowid DESC LIMIT ?", (session_id, anchor[0], max(1, limit // 2))).fetchall()
+                after = self.db.execute("SELECT * FROM messages WHERE session_id=? AND rowid>? ORDER BY rowid ASC LIMIT ?", (session_id, anchor[0], limit - len(before))).fetchall()
+                return [dict(row) for row in [*reversed(before), *after]]
             rows = self.db.execute("SELECT * FROM messages WHERE session_id=? ORDER BY created_at DESC LIMIT ?", (session_id, limit)).fetchall()
         return [dict(row) for row in reversed(rows)]
+
+    def message_source(self, message_id: str) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.db.execute("""SELECT m.id AS message_id,m.session_id,m.role,m.content,m.created_at,
+                s.title AS session_title FROM messages m JOIN sessions s ON s.id=m.session_id
+                WHERE m.id=?""", (message_id,)).fetchone()
+        return dict(row) if row else None
 
     def add_message(self, session_id: str, role: str, content: str) -> dict[str, Any]:
         item = {"id": uuid.uuid4().hex, "session_id": session_id, "role": role, "content": content, "created_at": now()}
@@ -783,6 +807,71 @@ class Store:
             row = self.db.execute("""SELECT id,source_ref,status,attempts,error,available_at,
                 lease_owner,lease_expires_at,created_at,updated_at FROM memory_jobs WHERE id=?""", (job_id,)).fetchone()
         return dict(row) if row else None
+
+    def stage_memory_reviews(self, job_id: str, owner: str, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Persist extracted candidates once per job and position, without activating them."""
+        timestamp = now()
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                job = self.db.execute("""SELECT source_ref FROM memory_jobs WHERE id=? AND status='running'
+                    AND lease_owner=? AND lease_expires_at>?""", (job_id, owner, timestamp)).fetchone()
+                if not job:
+                    raise RuntimeError("memory job lease lost before staging")
+                for ordinal, candidate in enumerate(candidates):
+                    content = str(candidate.get("content", "")).strip()[:4000]
+                    kind = str(candidate.get("kind", "fact"))
+                    if not content or kind not in {"fact", "preference", "profile", "goal", "procedure"}:
+                        continue
+                    importance = max(1, min(5, int(candidate.get("importance", 3))))
+                    self.db.execute("""INSERT OR IGNORE INTO memory_reviews
+                        (id,job_id,source_ref,ordinal,content,kind,importance,status,created_at,updated_at)
+                        VALUES (?,?,?,?,?,?,?,'pending',?,?)""",
+                        (uuid.uuid4().hex, job_id, job["source_ref"], ordinal, content, kind, importance, timestamp, timestamp))
+                self.db.execute("COMMIT")
+            except Exception:
+                self.db.execute("ROLLBACK")
+                raise
+            rows = self.db.execute("SELECT * FROM memory_reviews WHERE job_id=? ORDER BY ordinal", (job_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def memory_reviews(self, status: str = "pending", limit: int = 100) -> list[dict[str, Any]]:
+        with self.lock:
+            if status == "all":
+                rows = self.db.execute("SELECT * FROM memory_reviews ORDER BY created_at DESC,ordinal LIMIT ?", (limit,)).fetchall()
+            else:
+                rows = self.db.execute("SELECT * FROM memory_reviews WHERE status=? ORDER BY created_at,ordinal LIMIT ?", (status, limit)).fetchall()
+        return [dict(row) for row in rows]
+
+    def memory_review(self, review_id: str) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.db.execute("SELECT * FROM memory_reviews WHERE id=?", (review_id,)).fetchone()
+        return dict(row) if row else None
+
+    def claim_memory_review(self, review_id: str, content: str, kind: str, importance: int) -> dict[str, Any] | None:
+        with self.lock:
+            cursor = self.db.execute("""UPDATE memory_reviews SET status='applying',content=?,kind=?,importance=?,updated_at=?
+                WHERE id=? AND status='pending'""", (content.strip(), kind, importance, now(), review_id))
+            self.db.commit()
+        return self.memory_review(review_id) if cursor.rowcount else None
+
+    def finish_memory_review(self, review_id: str, memory_id: str | None, action: str) -> bool:
+        with self.lock:
+            cursor = self.db.execute("""UPDATE memory_reviews SET status='approved',applied_memory_id=?,applied_action=?,updated_at=?
+                WHERE id=? AND status='applying'""", (memory_id, action, now(), review_id))
+            self.db.commit()
+        return cursor.rowcount > 0
+
+    def reset_memory_review(self, review_id: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE memory_reviews SET status='pending',updated_at=? WHERE id=? AND status='applying'", (now(), review_id))
+            self.db.commit()
+
+    def reject_memory_review(self, review_id: str) -> bool:
+        with self.lock:
+            cursor = self.db.execute("UPDATE memory_reviews SET status='rejected',updated_at=? WHERE id=? AND status='pending'", (now(), review_id))
+            self.db.commit()
+        return cursor.rowcount > 0
 
     def undo_memory_sources(self, source_refs: list[str], dry_run: bool = False) -> dict[str, list[str]]:
         refs = [ref for ref in dict.fromkeys(source_refs) if ref]

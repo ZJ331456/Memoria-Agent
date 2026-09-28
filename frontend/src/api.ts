@@ -6,6 +6,8 @@ export type MemoryTimelineEntry=Memory&{replacement_reason:string|null;replaceme
 export type MemoryReindex={enabled:boolean;indexed:number;remaining:number}
 export type MemoryWrite={action:'created'|'reinforced'|'superseded';memory:Memory;previous_id:string|null;reason:string}
 export type MemoryJob={id:string;source_ref:string;status:'pending'|'running'|'retry'|'completed'|'failed';attempts:number;error:string|null;available_at:string|null;lease_owner:string|null;lease_expires_at:string|null;created_at:string;updated_at:string}
+export type MemoryReview={id:string;job_id:string;source_ref:string;ordinal:number;content:string;kind:MemoryKind;importance:number;status:'pending'|'applying'|'approved'|'rejected';applied_memory_id:string|null;applied_action:string|null;created_at:string;updated_at:string}
+export type MessageSource={message_id:string;session_id:string;session_title:string;role:string;content:string;created_at:string}
 export type MemoryUndo={affected_ids:string[];restored_ids:string[]}
 export type Tool={name:string;description:string;risk:'read-only'|'write'|string;owner?:string;always_on?:boolean;search_hint?:string}
 export type ToolSearchStatus={enabled:boolean;direct_tools:string[];searchable_tools:string[];groups:Array<{owner:string;tools:string[]}>}
@@ -27,7 +29,8 @@ export const api={
  overview:()=>call<Overview>('/api/overview'), sessions:()=>call<Session[]>('/api/sessions'),
  createSession:(title='新对话')=>call<Session>('/api/sessions',{method:'POST',body:JSON.stringify({title})}),
  renameSession:(id:string,title:string)=>call<Session>(`/api/sessions/${id}`,{method:'PATCH',body:JSON.stringify({title})}),
- deleteSession:(id:string)=>call<void>(`/api/sessions/${id}`,{method:'DELETE'}), messages:(id:string)=>call<Message[]>(`/api/sessions/${id}/messages`),
+ deleteSession:(id:string)=>call<void>(`/api/sessions/${id}`,{method:'DELETE'}), messages:(id:string,anchorId='')=>call<Message[]>(`/api/sessions/${id}/messages${anchorId?`?anchor_id=${encodeURIComponent(anchorId)}`:''}`),
+ messageSource:(id:string)=>call<MessageSource>(`/api/messages/${encodeURIComponent(id)}/source`),
  chat:(id:string,content:string)=>call<{message:Message;memories_created:Memory[];trace:Trace}>(`/api/sessions/${id}/chat`,{method:'POST',body:JSON.stringify({content})}),
  chatStream, cancelChat:(id:string)=>call<{status:'cancelled'|'idle';session_id:string}>(`/api/sessions/${id}/cancel`,{method:'POST'}),
  memories:(q='')=>call<Memory[]>(`/api/memories?q=${encodeURIComponent(q)}`), createMemory:(data:{content:string;kind:MemoryKind;importance:number})=>call<MemoryWrite>('/api/memories',{method:'POST',body:JSON.stringify(data)}),
@@ -35,6 +38,9 @@ export const api={
  correctMemory:(id:string,data:{content:string;kind:MemoryKind;importance:number;reason:string})=>call<Memory>(`/api/memories/${encodeURIComponent(id)}/correct`,{method:'POST',body:JSON.stringify(data)}),
  reindexMemories:(limit=1000)=>call<MemoryReindex>(`/api/memories/reindex?limit=${limit}`,{method:'POST'}),
  memoryJobs:(limit=50)=>call<MemoryJob[]>(`/api/memory-jobs?limit=${limit}`), retryMemoryJob:(id:string)=>call<MemoryJob>(`/api/memory-jobs/${id}/retry`,{method:'POST'}),
+ memoryReviews:(limit=100)=>call<MemoryReview[]>(`/api/memory-reviews?limit=${limit}`),
+ approveMemoryReview:(id:string,data:{content:string;kind:MemoryKind;importance:number})=>call<MemoryReview>(`/api/memory-reviews/${id}/approve`,{method:'POST',body:JSON.stringify(data)}),
+ rejectMemoryReview:(id:string)=>call<MemoryReview>(`/api/memory-reviews/${id}/reject`,{method:'POST'}),
  undoMemories:(sourceRefs:string[],dryRun=false)=>call<MemoryUndo>('/api/memories/undo',{method:'POST',body:JSON.stringify({source_refs:sourceRefs,dry_run:dryRun})}),
  updateMemory:(id:string,data:Partial<Pick<Memory,'content'|'kind'|'importance'>>)=>call<Memory>(`/api/memories/${id}`,{method:'PATCH',body:JSON.stringify(data)}), deleteMemory:(id:string)=>call<void>(`/api/memories/${id}`,{method:'DELETE'}),
  traces:(sessionId='')=>call<Trace[]>(`/api/traces?session_id=${encodeURIComponent(sessionId)}`), tools:()=>call<Tool[]>('/api/tools'),
