@@ -2,6 +2,8 @@
 
 Vite + React + TypeScript 前端，组件基于 shadcn Nova/Base UI 结构。聊天使用 MessageScroller/Message/Bubble，记忆运维使用 Card/Table/Badge/AlertDialog。
 
+界面使用 `src/theme.css` 统一视觉主题、桌面侧栏和移动端五入口导航。记忆页先展示摘要卡片，点击“查看时间线”才读取完整版本链。独立 API 请求失败时，其他已成功加载的面板仍可使用；侧栏连接状态来自 `GET /api/overview`。
+
 ## 开发与构建
 
 ```bash
