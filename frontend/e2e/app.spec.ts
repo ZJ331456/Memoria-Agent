@@ -28,7 +28,7 @@ async function mockApi(page:Page){
   if(path==='/api/memory-reviews')return json([])
   if(path==='/api/memories/undo')return json({affected_ids:['memory-1'],restored_ids:['memory-old']})
   if(path==='/api/traces')return json([])
-  if(path==='/api/overview')return json({sessions:1,messages:0,memories:0,memories_superseded:0,traces:0,memory_jobs_pending:0,memory_jobs_failed:1,models:{},tools:[],pipeline:{}})
+  if(path==='/api/overview')return json({sessions:1,messages:0,memories:1,memories_superseded:0,traces:0,memory_jobs_pending:0,memory_jobs_failed:1,models:{},tools:[],pipeline:{}})
   return json({code:'not_found',message:`unmocked ${path}`,request_id:'e2e'},404)
  })
 }
@@ -47,6 +47,7 @@ test('chat streams without blanking the application shell',async({page})=>{
 test('memory operations preview undo and retry failed jobs',async({page})=>{
  await page.getByRole('tab',{name:'记忆'}).click()
  await expect(page.getByTestId('memory-page')).toBeVisible()
+ await page.getByRole('button',{name:/存储与任务/}).click()
  await page.getByTestId('memory-job-failed').getByRole('button',{name:'重试'}).click()
  await expect(page.getByText('失败任务已重新排队')).toBeVisible()
  await page.getByTestId('memory-job-completed').getByRole('button',{name:'撤销'}).click()
@@ -58,13 +59,19 @@ test('memory operations preview undo and retry failed jobs',async({page})=>{
 
 test('memory timeline opens on demand and mobile navigation keeps all sections',async({page})=>{
  await page.getByRole('tab',{name:'记忆'}).click()
+ await expect(page.getByRole('tab',{name:'记忆'})).toHaveAttribute('data-active')
  await page.getByRole('button',{name:'检查并纠正'}).click()
+ await expect(page.getByRole('dialog',{name:'检查并纠正记忆'})).toBeVisible()
+ await expect(page.getByLabel('纠正后的记忆')).toBeFocused()
+ await expect(page.getByRole('button',{name:'保存纠正'})).toBeInViewport()
  await expect(page.getByTestId('memory-timeline')).toContainText('以前喜欢红茶')
  await expect(page.getByTestId('memory-timeline')).toContainText('现在喜欢乌龙茶')
  await page.setViewportSize({width:390,height:844})
  for(const label of ['对话','记忆','追踪','工具','设置'])await expect(page.getByRole('tab',{name:label})).toBeVisible()
  const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth)
  expect(overflow).toBe(false)
+ await page.keyboard.press('Escape')
+ await expect(page.getByRole('dialog',{name:'检查并纠正记忆'})).not.toBeVisible()
 })
 
 test('memory correction creates a visible version with a reason',async({page})=>{
@@ -81,7 +88,7 @@ test('memory correction creates a visible version with a reason',async({page})=>
  await page.getByLabel('纠正后的记忆').fill('现在喜欢普洱茶')
  await page.getByLabel('纠正原因').fill('用户更正')
  await page.getByRole('button',{name:'保存纠正'}).click()
- await expect(page.getByText('记忆已纠正，旧版本保留在时间线中')).toBeVisible()
+ await expect(page.getByText('纠正已保存，旧版本保留在下方时间线中。')).toBeVisible()
  await expect(page.getByTestId('memory-timeline')).toContainText('用户更正')
  await expect(page.getByTestId('memory-timeline')).toContainText('现在喜欢普洱茶')
 })
@@ -96,6 +103,7 @@ test('review candidates stay in queue until approved and source opens the origin
  })
  await page.reload()
  await page.getByRole('tab',{name:'记忆'}).click()
+ await page.getByRole('button',{name:/待审核候选/}).click()
  await expect(page.getByTestId('memory-review-item')).toHaveCount(1)
  await page.getByTestId('memory-review-item').getByRole('button',{name:'来源 ID：source-1'}).click()
  await expect(page.getByText('原始偏好：喜欢红茶')).toBeVisible()
@@ -105,6 +113,28 @@ test('review candidates stay in queue until approved and source opens the origin
  await page.getByRole('button',{name:'批准并写入'}).click()
  await expect(page.getByTestId('memory-review-item')).toHaveCount(0)
  await expect(page.getByText(/候选记忆已批准/)).toBeVisible()
+})
+
+test('Markdown edits remain as a labeled draft across sections and are cleared after saving',async({page})=>{
+ await page.route('**/api/markdown/SELF',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({name:'SELF',content:'已保存设定'})}))
+ await page.route('**/api/markdown/MEMORY',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({name:'MEMORY',content:'有效记忆快照'})}))
+ await page.route('**/api/markdown/SELF',async route=>{
+  if(route.request().method()==='PUT')return route.fulfill({contentType:'application/json',body:JSON.stringify({name:'SELF',content:route.request().postDataJSON().content})})
+  return route.fallback()
+ })
+ await page.getByRole('tab',{name:'记忆'}).click()
+ await page.getByRole('button',{name:/存储与任务/}).click()
+ await page.getByLabel('SELF.md 内容').fill('还没保存的设定')
+ await expect(page.getByText(/草稿未保存/)).toBeVisible()
+ await page.getByRole('button',{name:'MEMORY.md',exact:true}).click()
+ await expect(page.getByLabel('MEMORY.md 内容')).toHaveValue('有效记忆快照')
+ await page.getByRole('tab',{name:'对话'}).click()
+ await page.getByRole('tab',{name:'记忆'}).click()
+ await page.getByRole('button',{name:'SELF.md',exact:true}).click()
+ await expect(page.getByLabel('SELF.md 内容')).toHaveValue('还没保存的设定')
+ await page.getByRole('button',{name:'保存 SELF.md'}).click()
+ await expect(page.getByText('SELF.md 已保存到本地文件')).toBeVisible()
+ expect(await page.evaluate(()=>sessionStorage.getItem('memoria:markdown-draft:SELF'))).toBeNull()
 })
 
 test('a failed setup request does not hide conversations',async({page})=>{

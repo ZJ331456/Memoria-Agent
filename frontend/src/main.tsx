@@ -23,7 +23,7 @@ import{DotPattern}from'@/components/ui/dot-pattern'
 import{MagicCard}from'@/components/ui/magic-card'
 import'./styles.css'
 import'./theme.css'
-import{MemoryReviewPanel}from'./MemoryReviewPanel'
+import{MemoryInspectDialog}from'./MemoryInspectDialog'
 import{MemoryReviewQueue}from'./MemoryReviewQueue'
 
 type Page='chat'|'memory'|'runtime'|'tools'|'setup'
@@ -77,7 +77,7 @@ function App(){
    {error&&<Alert variant="destructive"><AlertTitle>请求失败</AlertTitle><AlertDescription>{error}</AlertDescription><AlertAction><Button variant="ghost" size="sm" onClick={()=>setError('')}>关闭</Button></AlertAction></Alert>}
    {setup?.setup_needed&&page!=='setup'&&<Alert><AlertTitle>需要完成 Setup</AlertTitle><AlertDescription>主模型尚未完整配置。请先填写模型、Base URL 与 API Key。</AlertDescription><AlertAction><Button size="sm" onClick={()=>setPage('setup')}>打开设置</Button></AlertAction></Alert>}
    {page==='chat'&&<ChatPage active={active} messages={messages} focusMessageId={focusMessageId} text={text} busy={busy} onText={setText} onSend={send} onCancel={cancel} onNew={newSession}/>}
-   {page==='memory'&&<MemoryPage items={memories} jobs={jobs} reviews={reviews} query={query} onQuery={setQuery} draft={memoryDraft} onDraft={setMemoryDraft} onAdd={addMemory} onDelete={async id=>{await api.deleteMemory(id);refresh()}} onCorrect={async(id,data)=>{const item=await api.correctMemory(id,data);setMemoryNotice('记忆已纠正，旧版本保留在时间线中');await refresh();return item}} onApproveReview={approveReview} onRejectReview={rejectReview} onSource={jumpToSource} onReindex={reindexMemories} onRetryJob={retryJob} onUndoJob={undoJob} reindexing={reindexing} memoryNotice={memoryNotice} onError={showError}/>}
+   {page==='memory'&&<MemoryPage items={memories} totalMemories={overview?.memories??memories.length} jobs={jobs} reviews={reviews} query={query} onQuery={setQuery} draft={memoryDraft} onDraft={setMemoryDraft} onAdd={addMemory} onDelete={async id=>{await api.deleteMemory(id);refresh()}} onCorrect={async(id,data)=>{const item=await api.correctMemory(id,data);setMemoryNotice('记忆已纠正，旧版本保留在时间线中');await refresh();return item}} onApproveReview={approveReview} onRejectReview={rejectReview} onSource={jumpToSource} onReindex={reindexMemories} onRetryJob={retryJob} onUndoJob={undoJob} reindexing={reindexing} memoryNotice={memoryNotice} onError={showError}/>}
    {page==='runtime'&&<RuntimePage overview={overview} traces={traces} onRunDrift={async(force)=>{try{await api.runDrift(force);await refresh()}catch(e){showError(e)}}}/>} 
    {page==='tools'&&<ToolsPage overview={overview} name={toolName} args={toolArgs} result={toolResult} busy={busy} onName={setToolName} onArgs={setToolArgs} onRun={runTool} onReloadMcp={async()=>{try{await api.reloadMcp();await refresh()}catch(e){showError(e)}}}/>}
    {page==='setup'&&<SetupPage setup={setup} onSaved={async()=>{await refresh();setPage('chat')}} onError={showError}/>}
@@ -101,25 +101,88 @@ function ChatPage({active,messages,focusMessageId,text,busy,onText,onSend,onCanc
  </section>
 }
 
-function MemoryPage({items,jobs,reviews,query,onQuery,draft,onDraft,onAdd,onDelete,onCorrect,onApproveReview,onRejectReview,onSource,onReindex,onRetryJob,onUndoJob,reindexing,memoryNotice,onError}:{items:Memory[];jobs:MemoryJob[];reviews:MemoryReview[];query:string;onQuery:(v:string)=>void;draft:{content:string;kind:MemoryKind;importance:number};onDraft:(v:{content:string;kind:MemoryKind;importance:number})=>void;onAdd:()=>void;onDelete:(id:string)=>void;onCorrect:(id:string,data:{content:string;kind:MemoryKind;importance:number;reason:string})=>Promise<Memory>;onApproveReview:(id:string,data:{content:string;kind:MemoryKind;importance:number})=>Promise<void>;onRejectReview:(id:string)=>Promise<void>;onSource:(sourceRef:string)=>Promise<void>;onReindex:()=>void;onRetryJob:(id:string)=>Promise<void>;onUndoJob:(sourceRef:string)=>Promise<MemoryUndo>;reindexing:boolean;memoryNotice:string;onError:(e:unknown)=>void}){
+type MemoryView = 'library' | 'review' | 'storage'
+
+function MemoryPage({items,totalMemories,jobs,reviews,query,onQuery,draft,onDraft,onAdd,onDelete,onCorrect,onApproveReview,onRejectReview,onSource,onReindex,onRetryJob,onUndoJob,reindexing,memoryNotice,onError}:{items:Memory[];totalMemories:number;jobs:MemoryJob[];reviews:MemoryReview[];query:string;onQuery:(v:string)=>void;draft:{content:string;kind:MemoryKind;importance:number};onDraft:(v:{content:string;kind:MemoryKind;importance:number})=>void;onAdd:()=>void;onDelete:(id:string)=>void;onCorrect:(id:string,data:{content:string;kind:MemoryKind;importance:number;reason:string})=>Promise<Memory>;onApproveReview:(id:string,data:{content:string;kind:MemoryKind;importance:number})=>Promise<void>;onRejectReview:(id:string)=>Promise<void>;onSource:(sourceRef:string)=>Promise<void>;onReindex:()=>void;onRetryJob:(id:string)=>Promise<void>;onUndoJob:(sourceRef:string)=>Promise<MemoryUndo>;reindexing:boolean;memoryNotice:string;onError:(e:unknown)=>void}){
  const[selectedMemory,setSelectedMemory]=useState<Memory|null>(null)
- return <section className="page" data-testid="memory-page">
-  <PageHeader title="长期记忆" description="结构化记忆 + MEMORY/SELF/PENDING Markdown 双层"><div className="flex items-center gap-2"><Badge>{items.length} 条</Badge><Button variant="outline" size="sm" onClick={onReindex} disabled={reindexing}>{reindexing?<Spinner data-icon="inline-start"/>:<RefreshCwIcon data-icon="inline-start"/>}回填向量</Button></div></PageHeader>
-  {memoryNotice&&<Alert><AlertTitle>记忆操作完成</AlertTitle><AlertDescription>{memoryNotice}</AlertDescription></Alert>}
-  <div className="two-column"><Card><CardHeader><CardTitle>新增记忆</CardTitle><CardDescription>明确记录事实、偏好、画像、目标或流程；重复内容会强化，变化内容会替代旧记忆。</CardDescription></CardHeader><CardContent><FieldGroup><Field><FieldLabel htmlFor="memory-content">记忆内容</FieldLabel><Textarea id="memory-content" value={draft.content} onChange={e=>onDraft({...draft,content:e.target.value})}/><FieldDescription>不要保存 API Key 或其他敏感凭据。</FieldDescription></Field><Field><FieldLabel>类型</FieldLabel><Select value={draft.kind} onValueChange={value=>onDraft({...draft,kind:value as MemoryKind})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectGroup>{memoryKinds.map(kind=><SelectItem key={kind} value={kind}>{kind}</SelectItem>)}</SelectGroup></SelectContent></Select></Field><Field><FieldLabel htmlFor="importance">重要度：{draft.importance}</FieldLabel><Input id="importance" type="range" min="1" max="5" value={draft.importance} onChange={e=>onDraft({...draft,importance:Number(e.target.value)})}/></Field></FieldGroup></CardContent><CardFooter><Button onClick={onAdd} disabled={!draft.content.trim()}><PlusIcon data-icon="inline-start"/>保存记忆</Button></CardFooter></Card><Card><CardHeader><CardTitle>有效记忆库</CardTitle><CardDescription>搜索并检查记忆来源、版本与纠正原因；已替代记忆不会注入对话。</CardDescription></CardHeader><CardContent><Field><FieldLabel htmlFor="memory-search">自然语言搜索</FieldLabel><div className="search-field"><SearchIcon/><Input id="memory-search" value={query} onChange={e=>onQuery(e.target.value)} placeholder="例如：我休息日喜欢做什么？"/></div></Field>{items.length===0?<Empty><EmptyHeader><EmptyMedia variant="icon"><DatabaseIcon/></EmptyMedia><EmptyTitle>没有匹配记忆</EmptyTitle><EmptyDescription>进行一次对话或手动添加记忆。</EmptyDescription></EmptyHeader></Empty>:<div className="memory-list">{items.map(item=><Card key={item.id} className="memory-item" data-selected={selectedMemory?.id===item.id}><CardHeader><CardTitle className="memory-title"><Badge>{item.kind}</Badge><span>{'★'.repeat(item.importance)}</span></CardTitle><CardDescription>{item.source} · 强化 {item.reinforcement} 次 · {date(item.updated_at)}</CardDescription></CardHeader><CardContent><p>{item.content}</p></CardContent><CardFooter><Button variant="outline" size="sm" onClick={()=>setSelectedMemory(current=>current?.id===item.id?null:item)}><HistoryIcon data-icon="inline-start"/>{selectedMemory?.id===item.id?"收起检查":"检查并纠正"}</Button><Button variant="ghost" size="sm" onClick={()=>{setSelectedMemory(null);onDelete(item.id)}}><Trash2Icon data-icon="inline-start"/>删除</Button></CardFooter></Card>)}</div>}{selectedMemory&&<MemoryReviewPanel key={selectedMemory.id} memory={selectedMemory} onCorrect={async data=>{const next=await onCorrect(selectedMemory.id,data);setSelectedMemory(next)}} onSource={onSource} onError={onError}/>}</CardContent></Card></div>
-  <MemoryReviewQueue items={reviews} onApprove={onApproveReview} onReject={onRejectReview} onSource={onSource} onError={onError}/>
-  <MarkdownLayerPanel onError={onError}/>
-  <Card><CardHeader><CardTitle className="flex items-center gap-2"><ListChecksIcon/>后台记忆任务</CardTitle><CardDescription>查看抽取、重试和 consolidation 状态；任务完成后，候选记忆仍需审核才能写入。已批准的变更可预览并撤销。</CardDescription></CardHeader><CardContent>{jobs.length===0?<Empty><EmptyHeader><EmptyMedia variant="icon"><ListChecksIcon/></EmptyMedia><EmptyTitle>暂无后台任务</EmptyTitle><EmptyDescription>完成一轮对话后任务会显示在这里。</EmptyDescription></EmptyHeader></Empty>:<Table><TableHeader><TableRow><TableHead>状态</TableHead><TableHead>来源</TableHead><TableHead>尝试</TableHead><TableHead>更新时间</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{jobs.map(job=><TableRow key={job.id} data-testid={`memory-job-${job.status}`}><TableCell><Badge variant={job.status==='failed'?'destructive':'secondary'}>{job.status}</Badge>{job.error&&<p className="job-error">{job.error}</p>}</TableCell><TableCell><Button variant="ghost" size="sm" onClick={()=>onSource(job.source_ref)}>{job.source_ref.slice(0,12)}</Button></TableCell><TableCell>{job.attempts}</TableCell><TableCell>{date(job.updated_at)}</TableCell><TableCell>{job.status==='failed'?<Button variant="outline" size="sm" onClick={()=>onRetryJob(job.id)}><RotateCcwIcon data-icon="inline-start"/>重试</Button>:job.status==='completed'&&reviews.some(review=>review.job_id===job.id)?<span className="text-muted-foreground">待审核</span>:job.status==='completed'?<UndoJobDialog job={job} onUndo={onUndoJob}/>:<span className="text-muted-foreground">自动处理中</span>}</TableCell></TableRow>)}</TableBody></Table>}</CardContent></Card>
+ const[view,setView]=useState<MemoryView>(()=>{
+  const saved=window.sessionStorage.getItem('memoria:memory-view')
+  return saved==='review'||saved==='storage'?saved:'library'
+ })
+ useEffect(()=>{window.sessionStorage.setItem('memoria:memory-view',view)},[view])
+ const failedJobs=jobs.filter(job=>job.status==='failed').length
+ const reviewJobs=new Set(reviews.map(review=>review.job_id))
+ return <section className="page memory-page" data-testid="memory-page">
+  <PageHeader title="长期记忆" description="审核候选、检查有效记忆，以及查看底层存储与任务。">
+   <Button variant="outline" size="sm" onClick={onReindex} disabled={reindexing}>{reindexing?<Spinner data-icon="inline-start"/>:<RefreshCwIcon data-icon="inline-start"/>}回填向量</Button>
+  </PageHeader>
+  <nav className="memory-view-nav" aria-label="记忆工作区">
+   <button type="button" aria-pressed={view==='library'} onClick={()=>setView('library')}><DatabaseIcon/><span><strong>有效记忆库</strong><small>搜索、检查与纠正</small></span><em>{totalMemories}</em></button>
+   <button type="button" aria-pressed={view==='review'} onClick={()=>setView('review')}><ListChecksIcon/><span><strong>待审核候选</strong><small>核对原话后决定是否写入</small></span><em>{reviews.length}</em></button>
+   <button type="button" aria-pressed={view==='storage'} onClick={()=>setView('storage')}><HistoryIcon/><span><strong>存储与任务</strong><small>Markdown 视图、抽取记录</small></span>{failedJobs>0&&<em className="memory-nav-warning">{failedJobs} 失败</em>}</button>
+  </nav>
+  {memoryNotice&&<Alert role="status"><AlertTitle>记忆操作完成</AlertTitle><AlertDescription>{memoryNotice}</AlertDescription></Alert>}
+  <div className="memory-view" hidden={view!=='library'}>
+   <div className="memory-workspace">
+    <Card className="memory-library-card"><CardHeader><CardTitle>有效记忆库</CardTitle><CardDescription>点击任意记忆的「检查并纠正」，会立即打开编辑窗口；旧版本保留在窗口内的时间线中。</CardDescription></CardHeader><CardContent>
+     <Field><FieldLabel htmlFor="memory-search">搜索有效记忆</FieldLabel><div className="search-field"><SearchIcon/><Input id="memory-search" value={query} onChange={e=>onQuery(e.target.value)} placeholder="例如：我休息日喜欢做什么？"/></div></Field>
+     <div className="memory-results-heading"><span>{query.trim()?`匹配 ${items.length} 条`:`当前显示 ${items.length} 条`}</span><small>已替代的版本可在对应记忆的检查窗口查看</small></div>
+     {items.length===0?<Empty><EmptyHeader><EmptyMedia variant="icon"><DatabaseIcon/></EmptyMedia><EmptyTitle>{query.trim()?'没有匹配记忆':'还没有有效记忆'}</EmptyTitle><EmptyDescription>{query.trim()?'试试其他关键词，或清空搜索。':'你可以手动添加，或先审核自动提取的候选。'}</EmptyDescription></EmptyHeader></Empty>:<div className="memory-list">{items.map(item=><Card key={item.id} className="memory-item"><CardHeader><CardTitle className="memory-title"><Badge>{item.kind}</Badge><span>{'★'.repeat(item.importance)}</span></CardTitle><CardDescription>{item.source} · 强化 {item.reinforcement} 次 · {date(item.updated_at)}</CardDescription></CardHeader><CardContent><p>{item.content}</p></CardContent><CardFooter><Button variant="outline" size="sm" onClick={()=>setSelectedMemory(item)}><HistoryIcon data-icon="inline-start"/>检查并纠正</Button><Button variant="ghost" size="sm" onClick={()=>onDelete(item.id)}><Trash2Icon data-icon="inline-start"/>删除</Button></CardFooter></Card>)}</div>}
+    </CardContent></Card>
+    <Card className="memory-add-card"><CardHeader><CardTitle>手动添加</CardTitle><CardDescription>主动记录确定的事实、偏好、目标或流程。</CardDescription></CardHeader><CardContent><FieldGroup><Field><FieldLabel htmlFor="memory-content">记忆内容</FieldLabel><Textarea id="memory-content" value={draft.content} onChange={e=>onDraft({...draft,content:e.target.value})} placeholder="例如：我偏好简洁的回答"/><FieldDescription>不要保存 API Key 或其他敏感凭据。</FieldDescription></Field><Field><FieldLabel>类型</FieldLabel><Select value={draft.kind} onValueChange={value=>onDraft({...draft,kind:value as MemoryKind})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectGroup>{memoryKinds.map(kind=><SelectItem key={kind} value={kind}>{kind}</SelectItem>)}</SelectGroup></SelectContent></Select></Field><Field><FieldLabel htmlFor="importance">重要度：{draft.importance}</FieldLabel><Input id="importance" type="range" min="1" max="5" value={draft.importance} onChange={e=>onDraft({...draft,importance:Number(e.target.value)})}/></Field></FieldGroup></CardContent><CardFooter><Button onClick={onAdd} disabled={!draft.content.trim()}><PlusIcon data-icon="inline-start"/>保存记忆</Button></CardFooter></Card>
+   </div>
+  </div>
+  <div className="memory-view" hidden={view!=='review'}><MemoryReviewQueue items={reviews} onApprove={onApproveReview} onReject={onRejectReview} onSource={onSource} onError={onError}/></div>
+  <div className="memory-view memory-storage" hidden={view!=='storage'}>
+   <div className="memory-storage-guide"><div><strong>SQLite · 可靠来源</strong><p>有效记忆、审核结果和任务状态保存在本地数据库。</p></div><div><strong>Markdown · 可读视图</strong><p>SELF 可编辑；MEMORY 从有效记忆生成；PENDING 保留旧记录。</p></div></div>
+   <MarkdownLayerPanel onError={onError}/>
+   <Card><CardHeader><CardTitle className="flex items-center gap-2"><ListChecksIcon/>后台抽取任务</CardTitle><CardDescription>任务完成表示候选提取完成；候选仍需在「待审核候选」中批准才能生效。</CardDescription></CardHeader><CardContent>{jobs.length===0?<Empty><EmptyHeader><EmptyMedia variant="icon"><ListChecksIcon/></EmptyMedia><EmptyTitle>暂无后台任务</EmptyTitle><EmptyDescription>完成一轮对话后任务会显示在这里。</EmptyDescription></EmptyHeader></Empty>:<div className="memory-job-list">{jobs.map(job=><div className="memory-job-row" key={job.id} data-testid={`memory-job-${job.status}`}><div className="memory-job-main"><Badge variant={job.status==='failed'?'destructive':'secondary'}>{({pending:'待处理',running:'处理中',retry:'待重试',completed:'提取完成',failed:'失败'} as Record<string,string>)[job.status]||job.status}</Badge><button type="button" className="source-ref-link" title={job.source_ref} onClick={()=>onSource(job.source_ref)}>来源 ID：{job.source_ref.slice(0,12)}</button>{job.error&&<p className="job-error">{job.error}</p>}</div><div className="memory-job-meta">尝试 {job.attempts} 次 · {date(job.updated_at)}</div><div className="memory-job-action">{job.status==='failed'?<Button variant="outline" size="sm" onClick={()=>onRetryJob(job.id)}><RotateCcwIcon data-icon="inline-start"/>重试</Button>:job.status==='completed'&&reviewJobs.has(job.id)?<span className="text-muted-foreground">等待候选审核</span>:job.status==='completed'?<UndoJobDialog job={job} onUndo={onUndoJob}/>:<span className="text-muted-foreground">自动处理中</span>}</div></div>)}</div>}</CardContent></Card>
+  </div>
+  {selectedMemory&&<MemoryInspectDialog memory={selectedMemory} onClose={()=>setSelectedMemory(null)} onCorrect={async data=>{const next=await onCorrect(selectedMemory.id,data);setSelectedMemory(next)}} onSource={onSource} onError={onError}/>}
  </section>
 }
 
+type MarkdownName = 'SELF' | 'PENDING' | 'MEMORY'
+const markdownDraftKey = (name: MarkdownName) => `memoria:markdown-draft:${name}`
+
 function MarkdownLayerPanel({onError}:{onError:(e:unknown)=>void}){
- const[tab,setTab]=useState<'SELF'|'PENDING'|'MEMORY'>('SELF'),[content,setContent]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('')
- const load=useCallback(async(name:typeof tab)=>{try{const item=await api.readMarkdown(name);setContent(item.content)}catch(e){onError(e)}},[onError])
- useEffect(()=>{load(tab)},[tab,load])
- const save=async()=>{setBusy(true);setNotice('');try{await api.writeMarkdown(tab,content);setNotice(`${tab}.md 已保存`)}catch(e){onError(e)}finally{setBusy(false)}}
- const sync=async()=>{setBusy(true);setNotice('');try{const item=await api.syncMemoryMarkdown();setTab('MEMORY');setContent(item.content);setNotice('MEMORY.md 已从结构化记忆同步')}catch(e){onError(e)}finally{setBusy(false)}}
- return <Card data-testid="markdown-layer"><CardHeader><CardTitle>Markdown 双层</CardTitle><CardDescription>SELF 可编辑并注入对话；PENDING 记录 consolidation；MEMORY 由数据库投影。</CardDescription></CardHeader><CardContent><div className="flex flex-wrap gap-2 mb-3"><Button size="sm" variant={tab==='SELF'?'default':'outline'} onClick={()=>setTab('SELF')}>SELF</Button><Button size="sm" variant={tab==='PENDING'?'default':'outline'} onClick={()=>setTab('PENDING')}>PENDING</Button><Button size="sm" variant={tab==='MEMORY'?'default':'outline'} onClick={()=>setTab('MEMORY')}>MEMORY</Button><Button size="sm" variant="outline" onClick={sync} disabled={busy}><RefreshCwIcon data-icon="inline-start"/>同步 MEMORY</Button></div>{notice&&<p className="text-sm text-muted-foreground mb-2">{notice}</p>}<Textarea className="font-mono min-h-56" value={content} onChange={e=>setContent(e.target.value)} readOnly={tab==='MEMORY'}/></CardContent><CardFooter>{tab==='MEMORY'?<span className="text-sm text-muted-foreground">MEMORY.md 只读，请通过记忆 API 修改。</span>:<Button onClick={save} disabled={busy}>{busy?<Spinner data-icon="inline-start"/>:null}保存 {tab}.md</Button>}</CardFooter></Card>
+ const[tab,setTab]=useState<MarkdownName>('SELF')
+ const[content,setContent]=useState('')
+ const[savedContent,setSavedContent]=useState('')
+ const[loading,setLoading]=useState(true)
+ const[busy,setBusy]=useState(false)
+ const[notice,setNotice]=useState('')
+ const onErrorRef=useRef(onError)
+ onErrorRef.current=onError
+ useEffect(()=>{
+  let cancelled=false
+  setLoading(true)
+  api.readMarkdown(tab).then(item=>{
+   if(cancelled)return
+   const cached=tab==='MEMORY'?null:window.sessionStorage.getItem(markdownDraftKey(tab))
+   if(cached===item.content)window.sessionStorage.removeItem(markdownDraftKey(tab))
+   setSavedContent(item.content)
+   setContent(cached??item.content)
+   if(cached!==null&&cached!==item.content)setNotice('已恢复此浏览器标签页中未保存的草稿。')
+  }).catch(error=>{if(!cancelled){setContent('');setSavedContent('');setNotice('文件读取失败，请重试。');onErrorRef.current(error)}}).finally(()=>{if(!cancelled)setLoading(false)})
+  return()=>{cancelled=true}
+ },[tab])
+ const dirty=tab!=='MEMORY'&&content!==savedContent
+ const update=(value:string)=>{
+  setContent(value)
+  if(value===savedContent)window.sessionStorage.removeItem(markdownDraftKey(tab))
+  else window.sessionStorage.setItem(markdownDraftKey(tab),value)
+ }
+ const changeTab=(name:MarkdownName)=>{if(name===tab)return;setNotice('');setTab(name)}
+ const save=async()=>{if(!dirty||loading||busy)return;setBusy(true);setNotice('');try{await api.writeMarkdown(tab,content);window.sessionStorage.removeItem(markdownDraftKey(tab));setSavedContent(content);setNotice(`${tab}.md 已保存到本地文件`)}catch(e){onError(e)}finally{setBusy(false)}}
+ const sync=async()=>{setBusy(true);setNotice('');try{await api.syncMemoryMarkdown();setTab('MEMORY');setNotice('MEMORY.md 已从有效记忆重新生成')}catch(e){onError(e)}finally{setBusy(false)}}
+ return <Card data-testid="markdown-layer"><CardHeader><CardTitle>Markdown 存储视图</CardTitle><CardDescription>文件视图供检查和编辑；有效记忆与审核状态以 SQLite 为准。</CardDescription></CardHeader><CardContent>
+  <div className="markdown-file-nav" aria-label="Markdown 文件"><Button size="sm" variant={tab==='SELF'?'default':'outline'} onClick={()=>changeTab('SELF')}>SELF.md</Button><Button size="sm" variant={tab==='MEMORY'?'default':'outline'} onClick={()=>changeTab('MEMORY')}>MEMORY.md</Button><Button size="sm" variant={tab==='PENDING'?'default':'outline'} onClick={()=>changeTab('PENDING')}>PENDING.md</Button></div>
+  <p className="markdown-file-hint">{tab==='SELF'?'用户可编辑的长期设定，会注入对话上下文。':tab==='MEMORY'?'由有效记忆生成的只读快照；修改记忆请回到有效记忆库。':'旧版待处理记录；新的自动提取候选请在待审核候选中处理。'}</p>
+  {notice&&<p className="markdown-notice" role="status">{notice}</p>}
+  <div className="markdown-editor-heading"><span>{tab}.md</span><small>{loading?'读取中…':dirty?'草稿未保存 · 暂存于当前浏览器标签页':tab==='MEMORY'?'只读':'已保存'}</small></div>
+  {loading?<div className="markdown-loading"><Spinner/>正在读取文件…</div>:<Textarea className="font-mono min-h-56" value={content} onChange={e=>update(e.target.value)} readOnly={tab==='MEMORY'||busy} aria-label={`${tab}.md 内容`}/>}
+ </CardContent><CardFooter className="markdown-footer">{tab==='MEMORY'?<span className="text-sm text-muted-foreground">此文件只读，保存记忆后可同步更新。</span>:<Button onClick={save} disabled={!dirty||busy||loading}>{busy?<Spinner data-icon="inline-start"/>:null}保存 {tab}.md</Button>}<Button size="sm" variant="outline" onClick={sync} disabled={busy||loading}><RefreshCwIcon data-icon="inline-start"/>同步 MEMORY.md</Button></CardFooter></Card>
 }
 
 function SetupPage({setup,onSaved,onError}:{setup:SetupStatus|null;onSaved:()=>Promise<void>;onError:(e:unknown)=>void}){

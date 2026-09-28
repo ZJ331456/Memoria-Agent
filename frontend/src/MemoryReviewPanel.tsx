@@ -47,8 +47,8 @@ export function MemoryReviewPanel({ memory, onCorrect, onSource, onError }: {
   }
 
   return <section className="memory-review" data-testid="memory-review" aria-label="检查并纠正记忆">
-    <div className="memory-timeline-heading"><span><HistoryIcon />记忆检查</span><small>来源：{memory.source}{memory.source_ref && ['conversation', 'reviewed_conversation'].includes(memory.source) ? <> · <button type="button" className="source-ref-link" onClick={() => onSource(memory.source_ref!)} title="查看原始对话">{memory.source_ref}</button></> : memory.source_ref ? ` · ${memory.source_ref}` : ''}</small></div>
-    <p className="memory-review-hint">纠正会生成新版本，旧内容留在下方时间线；对话只使用当前有效版本。</p>
+    <div className="memory-current"><div className="memory-current-meta"><Badge>当前有效</Badge><span>{memory.kind} · 重要度 {memory.importance}/5</span></div><p>{memory.content}</p><small>来源：{memory.source}{memory.source_ref && ['conversation', 'reviewed_conversation'].includes(memory.source) ? <> · <button type="button" className="source-ref-link" onClick={() => onSource(memory.source_ref!)} title="查看原始对话">{memory.source_ref}</button></> : memory.source_ref ? ` · ${memory.source_ref}` : ''}</small></div>
+    <div className="memory-edit-heading"><h3>修改这条记忆</h3><p>改好内容并填写原因，再点击下方的「保存纠正」。</p></div>
     <FieldGroup>
       <Field><FieldLabel htmlFor="correction-content">纠正后的记忆</FieldLabel><Textarea id="correction-content" maxLength={4000} value={draft.content} onChange={event => setDraft({ ...draft, content: event.target.value })} /></Field>
       <div className="memory-review-fields">

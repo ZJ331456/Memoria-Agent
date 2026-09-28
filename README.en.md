@@ -12,7 +12,7 @@ Memoria is built for local, single-user use. Conversations and memories are stor
 
 - **Keep conversations going:** Persist multiple sessions, stream replies, stop generation, and summarize older context when needed.
 - **Review long-term memory:** Extracted facts and preferences enter a review queue first. Open the original message, edit a candidate, then approve or reject it. Pending candidates never enter recall.
-- **Inspect and correct:** Follow a source ID back to the original conversation, inspect the version history, save a correction with a reason, or restore an earlier version. Only the active version is recalled.
+- **Inspect and correct:** Open a focused editor directly from any active memory. Follow its source ID to the original conversation, inspect its history, and save a correction with a reason. Only the active version is recalled.
 - **Use tools:** Built-in tools cover memory, conversation search, calculation, and web retrieval. Tool Search exposes tools on demand, and MCP connects external services.
 - **See what happened:** The Dashboard shows memory jobs, tool calls, and runtime traces. Optional Drift runs selected skills while idle under configurable limits.
 
@@ -38,10 +38,10 @@ Model settings are saved in the Git-ignored `data/models.override.toml`; the API
 ## Your first memory
 
 1. Tell Memoria a real preference or goal on the Chat page and finish a conversation.
-2. Open Memory → **自动记忆审核** (Automatic memory review). Use **查看原始对话** (View original conversation) to check context, then edit and approve the candidate or reject it.
-3. Approved items enter the active memory library. Choose **检查并纠正** (Inspect and correct) to see the source and versions; a correction makes a new version active while retaining the old one.
+2. Open Memory → **待审核候选** (Pending review). Use **查看原始对话** (View original conversation) to check context, then edit and approve the candidate or reject it.
+3. Open Memory → **有效记忆库** (Active memory library) and choose **检查并纠正** (Inspect and correct). The editor opens immediately with the content field focused. Enter a reason before saving; the old version stays in the timeline.
 
-Memory also has readable Markdown views: `MEMORY.md` is generated from active memories, and `SELF.md` can be edited by the user and injected into context. The older `PENDING.md` remains readable; SQLite is the source of truth for the new review queue.
+Memory → **存储与任务** (Storage and jobs) shows Markdown views and extraction jobs. `MEMORY.md` is generated from active memories, while `SELF.md` is editable and enters conversation context. Unsaved Markdown edits remain as a draft in the current browser tab until saved. The older `PENDING.md` remains readable; SQLite is the source of truth for the review queue.
 
 ## Optional capabilities
 
