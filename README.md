@@ -53,6 +53,7 @@ cp config.example.toml config.toml   # 填写 llm.*.api_key / base_url
 
 - **Drift**：无人对话时按预算跑限定技能（默认 `drift-digest` / `memory-review`）
 - 静默小时、空闲阈值、日预算、写工具白名单；审计表 `drift_runs`
+- 同技能读取上次已完成运行的摘要作为接续参考
 - 配置：`[agent.drift]`（见 `config.example.toml`）
 
 ### Dashboard / 安全
@@ -107,6 +108,7 @@ timezone = "Asia/Shanghai"
 | [API接口文档.md](docs/API接口文档.md) | 端点、错误协议、示例 |
 | [项目规划说明书.md](docs/项目规划说明书.md) | 规划与对照 |
 | [五项目对照与第十二轮优化.md](docs/五项目对照与第十二轮优化.md) | 五个参考项目对照、长问题召回修复与后续优先级 |
+| [前后端优化与记忆时间线.md](docs/前后端优化与记忆时间线.md) | 前后端审计、界面改版及 Akashic/Claude-Mem 机制落地 |
 | [简历项目经历.md](docs/简历项目经历.md) | 简历用描述 |
 | [skills/README.md](skills/README.md) | 轻量 Skills 约定 |
 | [memoria/api/README.md](memoria/api/README.md) | API 包维护说明 |
