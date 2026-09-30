@@ -104,6 +104,11 @@ class MemoryResponse(BaseModel):
     supersedes_id: str | None = None
     last_reinforced_at: str | None = None
     source_ref: str | None = None
+    valid_at: str | None = None
+    invalid_at: str | None = None
+    attributes: dict = Field(default_factory=dict)
+    entities: list = Field(default_factory=list)
+    provenance: dict = Field(default_factory=dict)
 
 
 class MemoryReindexResponse(BaseModel):
@@ -748,6 +753,14 @@ def _register_round13(app):
     def time_travel(as_of: str = _Q(min_length=4, max_length=40), q: str = _Q(default="", max_length=200), limit: int = _Q(default=20, ge=1, le=200)):
         store = app.state.store
         return store.time_travel(as_of, limit, q)
+
+    @app.get("/api/memories/{memory_id}", tags=["memories"], summary="记忆详情(含邻居与演化链)")
+    def memory_detail(memory_id: str):
+        item = store.memory(memory_id)
+        if not item: raise HTTPException(status_code=404, detail="memory not found")
+        item["neighbors"] = store.memory_neighbors(memory_id, depth=1, limit=10)
+        item["evolutions"] = store.memory_evolutions(memory_id)
+        return item
 
     @app.get("/api/memories/{memory_id}/neighbors", tags=["memories"], summary="记忆图邻居(一跳/多跳)")
     def neighbors(memory_id: str, depth: int = _Q(default=1, ge=1, le=3)):

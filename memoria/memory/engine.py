@@ -128,9 +128,16 @@ class MemoryEngine:
         semantic_floor = max(0.45, top_similarity - 0.18)
         semantic = sorted((item for item in items if vector_scores.get(item["id"], -1) >= semantic_floor), key=lambda item: vector_scores[item["id"]], reverse=True)
 
+        doc_freq: dict[str, int] = {}
+        tokenized = {item["id"]: self._tokens(item["content"]) for item in items}
+        for toks in tokenized.values():
+            for token in toks: doc_freq[token] = doc_freq.get(token, 0) + 1
+        avg_len = sum(len(t) for t in tokenized.values()) / max(1, len(tokenized))
+        bm25_scores = {mid: self._bm25(query_tokens, toks, len(toks), avg_len, doc_freq, max(1, len(tokenized))) for mid, toks in tokenized.items()}
+        bm25_ranked = sorted((mid for mid, sc in bm25_scores.items() if sc > 0), key=lambda m: bm25_scores[m], reverse=True)
         fused: dict[str, float] = {}
-        lanes: dict[str, list[str]] = {"keyword": [item["id"] for item in lexical], "vector": [item["id"] for item in semantic]}
-        for lane, weight in ((lexical, 0.8), (semantic, 1.0)):
+        lanes: dict[str, list[str]] = {"keyword": [item["id"] for item in lexical], "vector": [item["id"] for item in semantic], "bm25": bm25_ranked}
+        for lane, weight in ((lexical, 0.8), (semantic, 1.0), ([by_id[m] for m in bm25_ranked if m in by_id], 0.9)):
             for rank, item in enumerate(lane, start=1):
                 fused[item["id"]] = fused.get(item["id"], 0.0) + weight / (60 + rank)
         by_id = {item["id"]: item for item in items}
@@ -249,6 +256,16 @@ class MemoryEngine:
                 except Exception: pass
                 return MemoryWriteResult("superseded", saved, target_id, reason)
 
+        if not self.decider:
+            for item in related:
+                full = self.store.memory(item["id"])
+                if full and full.get("status") == "active" and kind in {"preference", "profile", "goal", "procedure"} and self._contradicts(content, full["content"]):
+                    saved = self.store.add_memory(content, kind, importance, source, vector, item["id"], "contradiction auto-supersede", source_ref)
+                    try:
+                        self.store.temporal_invalidate(item["id"], saved["id"])
+                        self.store.record_evolution(saved["id"], f"矛盾替代 {item['id']}: {content[:120]}")
+                    except Exception: pass
+                    return MemoryWriteResult("superseded", saved, item["id"], "contradiction auto-supersede")
         saved = self.store.add_memory(content, kind, importance, source, vector, source_ref=source_ref)
         try:
             organized = self.organize(content, kind)
@@ -321,6 +338,25 @@ class MemoryEngine:
                 item["embedding"] = vector
                 indexed += 1
         return indexed
+
+
+    @staticmethod
+    def _bm25(query_tokens: set[str], item_tokens: set[str], doc_len: int, avg_len: float, doc_freq: dict[str, int], total_docs: int) -> float:
+        score = 0.0
+        for token in query_tokens & item_tokens:
+            df = doc_freq.get(token, 1)
+            idf = max(0.0, __import__("math").log((total_docs - df + 0.5) / (df + 0.5) + 1.0))
+            tf = 1.0
+            score += idf * (tf * 2.2) / (tf + 1.2 * (1 - 0.75 + 0.75 * (doc_len / max(1.0, avg_len))))
+        return score
+
+    @staticmethod
+    def _contradicts(a: str, b: str) -> bool:
+        neg = ("不", "没", "否", "不是", "不再", "讨厌", "反对", "not ", "n't ", "never ", "no longer ")
+        ax, bx = a.strip().lower(), b.strip().lower()
+        if MemoryEngine._similar(MemoryEngine._normalize(ax), MemoryEngine._normalize(bx)) < 0.45:
+            return False
+        return any(n in ax for n in neg) != any(n in bx for n in neg)
 
     @staticmethod
     def _tokens(text: str) -> set[str]:

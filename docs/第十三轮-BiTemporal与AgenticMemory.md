@@ -19,3 +19,9 @@
 
 ## 验证
 `pytest tests/test_core.py -q` 全过；手动：创建偏好→supersede→time_travel 查旧时刻返回旧版本；evolve 产生新版本 + evolution 记录；neighbors 非空。
+
+## 第十四轮补强（BM25 + 矛盾自动替代 + 详情聚合）
+- `retrieve()` 新增第三路 BM25（token DF/IDF + 长度归一），与 keyword/vector 做三路 RRF 融合，纯关键词查询更稳。
+- 无 LLM decider 时，`remember()` 对 preference/profile/goal/procedure 做矛盾检测（否定词翻转 + 文本相似度≥0.45），命中则自动 supersede + `temporal_invalidate` + evolution 记录（Graphiti 式矛盾解决的轻量版）。
+- `MemoryResponse` 新增 `valid_at/invalid_at/attributes/entities/provenance`；新增 `GET /api/memories/{id}` 详情聚合（本体 + neighbors + evolutions）。
+- 回归：`test_round14_bm25_contradiction_and_detail`（喜欢咖啡→不喜欢咖啡自动替代、invalid_at 非空、检索命中、演化链非空）。

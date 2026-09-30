@@ -288,3 +288,17 @@ def test_trace_redacts_credentials(tmp_path: Path):
     trace = TurnTracer(store, "s").finish("failed", 1, [{"id":"m1","content":"private","kind":"fact"}], [{"name":"x","arguments":{"api_key":"sk-1234567890"},"preview":"Bearer abcdef123"}], "sk-abcdefghijk")
     dumped = str(trace)
     assert "private" not in dumped and "1234567890" not in dumped and "abcdef123" not in dumped
+
+def test_round14_bm25_contradiction_and_detail(tmp_path):
+    store = Store(tmp_path / "r14.db")
+    engine = MemoryEngine(store)
+    r1 = asyncio.run(engine.remember("用户喜欢喝咖啡", "preference", 4, "manual", None))
+    assert r1.action == "created"
+    r2 = asyncio.run(engine.remember("用户不喜欢喝咖啡", "preference", 4, "manual", None))
+    assert r2.action == "superseded"
+    assert r2.previous_id == r1.memory["id"]
+    old = store.memory(r1.memory["id"])
+    assert old["invalid_at"] is not None
+    hits = asyncio.run(engine.retrieve("咖啡偏好", limit=5))
+    assert any("咖啡" in h["content"] for h in hits)
+    assert len(store.memory_evolutions(r2.memory["id"])) >= 1
