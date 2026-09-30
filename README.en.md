@@ -77,3 +77,5 @@ These open-source projects informed parts of Memoria-Agent's design. Memoria-Age
 - [claude-mem](https://github.com/thedotmack/claude-mem) — Session capture, compression, and context recall across sessions.
 - [Holt](https://github.com/holt-os/holt) — Personal agent memory with visible sources.
 - [Mem0](https://github.com/mem0ai/mem0) — Memory storage and retrieval for agents.
+- [Graphiti](https://github.com/getzep/graphiti) — Temporal knowledge graph framework with validity windows and hybrid retrieval.
+- [A-mem](https://github.com/WujiangXu/AgenticMemory) — Agentic memory with self-organizing notes, links, and continuous evolution.

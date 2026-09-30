@@ -77,3 +77,5 @@ npm run test:e2e --prefix frontend
 - [claude-mem](https://github.com/thedotmack/claude-mem) — 会话记录、压缩与跨会话上下文召回。
 - [Holt](https://github.com/holt-os/holt) — 可查看来源的个人 Agent 记忆。
 - [Mem0](https://github.com/mem0ai/mem0) — 面向 Agent 的记忆存储与检索。
+- [Graphiti](https://github.com/getzep/graphiti) — 时序知识图谱框架，事实带有效期窗口与混合检索。
+- [A-mem](https://github.com/WujiangXu/AgenticMemory) — Agentic Memory，自组织记忆笔记、关联与持续演化。
