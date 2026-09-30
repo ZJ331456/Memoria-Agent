@@ -30,11 +30,11 @@ export function MemoryReviewPanel({ memory, onCorrect, onSource, onError }: {
     setLoading(true)
     api.memoryTimeline(memory.id)
       .then(items => { if (!cancelled) setVersions(items) })
+      .catch(error => { if (!cancelled) onError(error) })
+      .finally(() => { if (!cancelled) setLoading(false) })
     api.memoryDetail(memory.id)
       .then(item => { if (!cancelled) setDetail(item) })
       .catch(() => { if (!cancelled) setDetail(null) })
-      .catch(error => { if (!cancelled) onError(error) })
-      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [memory.id])
 

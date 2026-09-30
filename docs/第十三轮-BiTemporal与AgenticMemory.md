@@ -30,3 +30,9 @@
 - `api.ts`：`Memory` 新增 `valid_at/invalid_at/attributes/entities/provenance/link_relation`；新增 `memoryDetail/memoryNeighbors/memoryEvolutions/timeTravel/evolveMemory` 五个调用。
 - `MemoryReviewPanel`：检查对话框新增"关联与演化"区——有效期（valid_at → invalid_at/至今有效）、实体词、关联记忆（kind + relation + 内容，最多 5 条）、演化记录全文。
 - 校验：`tsc --noEmit` 通过；后端 17 个测试全过。
+
+## 前端优化（二轮：Bug 修复 + 类型筛选 + 样式）
+- Bug：`MemoryReviewPanel` 中 timeline 请求无 `.catch`（失败时 unhandled），`memoryDetail` 链有两个串联 `.catch`（第二个不可达）且 `loading` 被 detail 链控制。已拆分为 timeline 自带 catch+loading、detail 静默降级。
+- 新增记忆库类型筛选（全部/fact/preference/profile/goal/procedure），计数与空状态随筛选更新。
+- 新增 `.memory-graph/.memory-temporal/.memory-neighbors/.memory-evolutions/.kind-chip` 样式（此前有关联演化 DOM 但无样式）。
+- 校验：`tsc --noEmit` 干净，`vite build` 成功，后端 17 测试全过。

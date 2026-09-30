@@ -78,3 +78,11 @@
   .app-main { @apply ml-0 p-4; }
   .page-chat { height: 760px; }
 }
+
+.memory-graph{display:flex;flex-direction:column;gap:.5rem;border:1px solid var(--border);border-radius:.6rem;padding:.6rem .8rem;background:var(--muted)}
+.memory-temporal{display:flex;flex-wrap:wrap;gap:.25rem .75rem;color:var(--muted-foreground)}
+.memory-neighbors ul,.memory-evolutions ul{margin:.25rem 0 0;padding-left:1rem;display:flex;flex-direction:column;gap:.35rem}
+.memory-neighbors p,.memory-evolutions p{margin:.1rem 0 0}
+.memory-kind-filter{display:flex;flex-wrap:wrap;gap:.4rem;margin:.6rem 0}
+.kind-chip{border:1px solid var(--border);border-radius:999px;padding:.2rem .7rem;font-size:.8rem;background:var(--background)}
+.kind-chip[aria-pressed="true"]{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
