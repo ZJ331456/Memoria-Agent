@@ -1,7 +1,7 @@
 
 # Git Commit Message Rules
 
-为了保持项目 Git 提交记录清晰、规范、易维护，所有 Commit Message 请遵循以下提交规范。
+为了保持项目 Git 提交记录清晰、规范、易维护，所有 Commit Message 请遵循以下提交规范，远程仓库链接：https://github.com/ZJ331456/Memoria-Agent。
 
 Commit Message 采用 **Conventional Commits** 风格：
 
@@ -302,4 +302,18 @@ perf: 优化 embedding 模型推理速度
 docs: 更新 README 使用说明
 
 refactor: 重构 evaluation 评测模块
+```
+
+---
+
+# 附录：第十三轮变更提交记录（Bi-temporal + Agentic Memory）
+
+本轮按规范提交（一个 Commit 对应一个主要修改）：
+
+```bash
+feat: 新增记忆 bi-temporal 版本治理 valid_at/invalid_at 与时间旅行查询
+feat: 新增记忆图交叉链接与检索图遍历增强
+feat: 新增记忆持续演化 evolve 与演化审计
+docs: 新增第十三轮 BiTemporal 与 AgenticMemory 设计文档
+test: 新增时间旅行与记忆演化回归用例
 ```

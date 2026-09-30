@@ -714,6 +714,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         service.runtime.memory.refresh_markdown()
         return Response(status_code=204)
 
+    try:
+        _register_round13(app)
+    except Exception:
+        pass
     dist = settings.root / "frontend" / "dist"
     if dist.exists():
         app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
@@ -731,3 +735,44 @@ def _error(request: Request, status: int, code: str, message: str) -> JSONRespon
 
 def _error_code(status: int) -> str:
     return {401: "unauthorized", 403: "forbidden", 404: "not_found", 409: "conflict", 413: "payload_too_large", 429: "rate_limited", 502: "upstream_error"}.get(status, "request_error")
+
+# ---- 第十三轮: Bi-temporal + Agentic Memory 路由(追加,避免改动原有路由) ----
+class EvolveBody(StrictModel):
+    new_info: str = Field(min_length=1, max_length=4000)
+    reason: str = Field(default="", max_length=500)
+
+def _register_round13(app):
+    from fastapi import Query as _Q
+
+    @app.get("/api/memories/time-travel", tags=["memories"], summary="时间旅行查询某时刻有效记忆")
+    def time_travel(as_of: str = _Q(min_length=4, max_length=40), q: str = _Q(default="", max_length=200), limit: int = _Q(default=20, ge=1, le=200)):
+        store = app.state.store
+        return store.time_travel(as_of, limit, q)
+
+    @app.get("/api/memories/{memory_id}/neighbors", tags=["memories"], summary="记忆图邻居(一跳/多跳)")
+    def neighbors(memory_id: str, depth: int = _Q(default=1, ge=1, le=3)):
+        store = app.state.store
+        if not store.memory(memory_id):
+            from fastapi import HTTPException as _H; raise _H(404, "记忆不存在")
+        return store.memory_neighbors(memory_id, depth)
+
+    @app.post("/api/memories/{memory_id}/links/{other_id}", tags=["memories"], summary="建立记忆交叉链接")
+    def add_link(memory_id: str, other_id: str, relation: str = _Q(default="related", max_length=40)):
+        store = app.state.store
+        item = store.add_memory_link(memory_id, other_id, relation)
+        if not item:
+            from fastapi import HTTPException as _H; raise _H(422, "无法建立链接")
+        return item
+
+    @app.post("/api/memories/{memory_id}/evolve", tags=["memories"], summary="记忆持续演化(refinement)")
+    async def evolve(memory_id: str, body: EvolveBody):
+        service = app.state.service
+        item = await service.runtime.memory.evolve(memory_id, body.new_info, body.reason)
+        if not item:
+            from fastapi import HTTPException as _H; raise _H(404, "记忆不存在或非有效版本")
+        return item
+
+    @app.get("/api/memories/{memory_id}/evolutions", tags=["memories"], summary="记忆演化历史")
+    def evolutions(memory_id: str):
+        return app.state.store.memory_evolutions(memory_id)
+

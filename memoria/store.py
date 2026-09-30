@@ -143,6 +143,27 @@ class Store:
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_memory_jobs_available ON memory_jobs(status, available_at, lease_expires_at)")
             self.db.execute("UPDATE memory_reviews SET status='pending' WHERE status='applying'")
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status, updated_at DESC)")
+            for _column, _statement in {
+                "valid_at": "ALTER TABLE memories ADD COLUMN valid_at TEXT",
+                "invalid_at": "ALTER TABLE memories ADD COLUMN invalid_at TEXT",
+                "attributes_json": "ALTER TABLE memories ADD COLUMN attributes_json TEXT NOT NULL DEFAULT '{}'",
+                "entities_json": "ALTER TABLE memories ADD COLUMN entities_json TEXT NOT NULL DEFAULT '[]'",
+                "provenance_json": "ALTER TABLE memories ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}'",
+            }.items():
+                try:
+                    self.db.execute(_statement)
+                except sqlite3.OperationalError:
+                    pass
+            self.db.execute("""CREATE TABLE IF NOT EXISTS memory_links (
+                id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL,
+                relation TEXT NOT NULL DEFAULT 'related', weight REAL NOT NULL DEFAULT 1.0,
+                created_at TEXT NOT NULL, UNIQUE(from_id,to_id,relation))""")
+            self.db.execute("CREATE INDEX IF NOT EXISTS idx_memory_links_from ON memory_links(from_id)")
+            self.db.execute("CREATE INDEX IF NOT EXISTS idx_memory_links_to ON memory_links(to_id)")
+            self.db.execute("""CREATE TABLE IF NOT EXISTS memory_evolutions (
+                id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, summary TEXT NOT NULL,
+                created_at TEXT NOT NULL)""")
+            self.db.execute("CREATE INDEX IF NOT EXISTS idx_memory_evolutions_mem ON memory_evolutions(memory_id, created_at DESC)")
             self._init_fts()
             self.vector_index = SQLiteVecIndex(self.db, vector_backend)
             self._bootstrap_vector_index()
@@ -935,3 +956,93 @@ class Store:
         result["tools"] = json.loads(result.pop("tools_json", "[]"))
         result["metadata"] = json.loads(result.pop("metadata_json", "{}"))
         return result
+
+    # ---- 第十三轮: Bi-temporal + Agentic Memory 扩展 ----
+    def _temporal(self, item: dict) -> dict:
+        import json as _j
+        item.setdefault("valid_at", item.get("created_at"))
+        item.setdefault("invalid_at", None)
+        for key, default in (("attributes_json", "{}"), ("entities_json", "[]"), ("provenance_json", "{}")):
+            item.setdefault(key, default)
+        try: item["attributes"] = _j.loads(item.get("attributes_json") or "{}")
+        except Exception: item["attributes"] = {}
+        try:
+            entities = _j.loads(item.get("entities_json") or "[]")
+            item["entities"] = entities if isinstance(entities, list) else []
+        except Exception: item["entities"] = []
+        try: item["provenance"] = _j.loads(item.get("provenance_json") or "{}")
+        except Exception: item["provenance"] = {}
+        return item
+
+    def set_temporal(self, memory_id: str, valid_at: str | None = None, invalid_at: str | None = None) -> dict | None:
+        with self.lock:
+            row = self.db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+            if not row: return None
+            item = dict(row)
+            item["valid_at"] = valid_at or item.get("valid_at") or item.get("created_at")
+            item["invalid_at"] = invalid_at
+            self.db.execute("UPDATE memories SET valid_at=?, invalid_at=?, updated_at=? WHERE id=?", (item["valid_at"], invalid_at, now(), memory_id))
+            self.db.commit()
+        return self.memory(memory_id)
+
+    def temporal_invalidate(self, old_id: str, new_id: str, invalid_at: str | None = None) -> None:
+        ts = invalid_at or now()
+        with self.lock:
+            self.db.execute("UPDATE memories SET invalid_at=? WHERE id=? AND invalid_at IS NULL", (ts, old_id))
+            self.db.execute("UPDATE memories SET valid_at=COALESCE(valid_at,?) WHERE id=?", (ts, new_id))
+            self.db.commit()
+
+    def time_travel(self, as_of: str, limit: int = 100, query: str = "") -> list[dict]:
+        with self.lock:
+            params: list = [as_of, as_of]
+            clause = "WHERE valid_at IS NOT NULL AND valid_at<=? AND (invalid_at IS NULL OR invalid_at>?)"
+            if query:
+                clause += " AND content LIKE ?"; params.append(f"%{query}%")
+            rows = self.db.execute(f"SELECT * FROM memories {clause} ORDER BY importance DESC, updated_at DESC LIMIT ?", (*params, limit)).fetchall()
+        out = []
+        for row in rows:
+            item = self._memory(dict(row)); out.append(self._temporal(item))
+        return out
+
+    def add_memory_link(self, from_id: str, to_id: str, relation: str = "related", weight: float = 1.0) -> dict | None:
+        if from_id == to_id: return None
+        import uuid as _u
+        item = {"id": _u.uuid4().hex, "from_id": from_id, "to_id": to_id, "relation": relation[:40], "weight": weight, "created_at": now()}
+        with self.lock:
+            try:
+                self.db.execute("INSERT OR IGNORE INTO memory_links VALUES (:id,:from_id,:to_id,:relation,:weight,:created_at)", item)
+                self.db.commit()
+            except Exception: return None
+        return item
+
+    def memory_neighbors(self, memory_id: str, depth: int = 1, limit: int = 20) -> list[dict]:
+        seen, frontier, out = {memory_id}, [memory_id], []
+        with self.lock:
+            for _ in range(max(1, depth)):
+                if not frontier: break
+                q = ",".join("?" for _ in frontier)
+                rows = self.db.execute(f"SELECT * FROM memory_links WHERE from_id IN ({q}) OR to_id IN ({q})", (*frontier, *frontier)).fetchall()
+                frontier = []
+                for row in rows:
+                    d = dict(row)
+                    for other in (d["from_id"], d["to_id"]):
+                        if other not in seen:
+                            seen.add(other); frontier.append(other)
+                            mem = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active'", (other,)).fetchone()
+                            if mem:
+                                m = self._memory(dict(mem)); m["link_relation"] = d["relation"]; out.append(self._temporal(m))
+                            if len(out) >= limit: return out
+        return out
+
+    def record_evolution(self, memory_id: str, summary: str) -> dict:
+        import uuid as _u
+        item = {"id": _u.uuid4().hex, "memory_id": memory_id, "summary": summary[:2000], "created_at": now()}
+        with self.lock:
+            self.db.execute("INSERT INTO memory_evolutions VALUES (:id,:memory_id,:summary,:created_at)", item)
+            self.db.commit()
+        return item
+
+    def memory_evolutions(self, memory_id: str) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT * FROM memory_evolutions WHERE memory_id=? ORDER BY created_at", (memory_id,)).fetchall()
+        return [dict(r) for r in rows]

@@ -23,6 +23,8 @@ class MemoryWriteResult:
     memory: dict[str, Any] | None
     previous_id: str | None = None
     reason: str = ""
+    valid_at: str | None = None
+    invalid_at: str | None = None
 
     def public_dict(self) -> dict[str, Any]:
         memory = dict(self.memory) if self.memory else None
@@ -48,13 +50,47 @@ class MemoryEngine:
         self.vector_scan_limit = max(100, vector_scan_limit)
         self.markdown = markdown
 
-    async def retrieve(self, query: str, limit: int = 8, kinds: set[str] | None = None) -> list[dict]:
+    @staticmethod
+    def organize(content: str, kind: str) -> dict[str, Any]:
+        entities = sorted(set(re.findall(r"[\u4e00-\u9fff]{2,8}|[A-Z][a-zA-Z0-9_-]{1,30}", content)))[:8]
+        keywords = sorted(MemoryEngine._tokens(content))[:12]
+        return {"entities": entities, "keywords": keywords, "topic": (content[:24] or kind),
+                "confidence": 0.9 if entities else 0.6, "organized_by": "agent"}
+
+    def auto_link(self, memory_id: str, entities: list[str], limit: int = 10) -> int:
+        if not entities: return 0
+        count = 0
+        for item in self.store.memories(limit=200):
+            if item["id"] == memory_id: continue
+            other = set(item.get("entities") or []) or self._tokens(item["content"])
+            overlap = len(set(entities) & set(other)) if other else 0
+            lex = self._similar(self._normalize(" ".join(entities)), self._normalize(item["content"]))
+            if overlap > 0 or lex >= 0.12:
+                self.store.add_memory_link(memory_id, item["id"], "related", min(1.0, 0.4 + overlap * 0.2 + lex))
+                count += 1
+                if count >= limit: break
+        return count
+
+    async def evolve(self, memory_id: str, new_info: str, reason: str = "") -> dict[str, Any] | None:
+        current = self.store.memory(memory_id)
+        if not current or current["status"] != "active": return None
+        merged = f"{current['content']}；{new_info.strip()}"
+        result = await self.remember(merged, current["kind"], int(current["importance"]), "evolved", None)
+        if result.memory:
+            self.store.record_evolution(result.memory["id"], f"由 {memory_id} 演化: {reason or new_info[:120]}")
+        return result.memory
+
+    async def retrieve(self, query: str, limit: int = 8, kinds: set[str] | None = None, as_of: str | None = None, expand_graph: bool = True) -> list[dict]:
         lexical_seed = self.store.keyword_memory_candidates(query, limit=200) if query.strip() else []
         indexed = self.store.vector_index_status["enabled"]
         items = self.store.memories(limit=200 if indexed else self.vector_scan_limit)
         if kinds:
             items = [item for item in items if item.get("kind") in kinds]
             lexical_seed = [item for item in lexical_seed if item.get("kind") in kinds]
+        if as_of:
+            items = self.store.time_travel(as_of, limit=max(1, limit * 3), query=query.strip())
+            if kinds: items = [i for i in items if i.get("kind") in kinds]
+            return [{k: v for k, v in i.items() if k != "embedding"} for i in items[:limit]]
         if not query.strip():
             return []
         by_id = {item["id"]: item for item in [*items, *lexical_seed]}
@@ -106,6 +142,16 @@ class MemoryEngine:
             ),
             reverse=True,
         )
+        if expand_graph and ranked_ids:
+            try:
+                seen = set(ranked_ids)
+                for mid in list(ranked_ids)[:3]:
+                    for nb in self.store.memory_neighbors(mid, depth=1, limit=3):
+                        if nb["id"] not in seen and (not kinds or nb.get("kind") in kinds):
+                            seen.add(nb["id"]); by_id[nb["id"]] = nb
+                            fused[nb["id"]] = fused.get(nb["id"], 0.0) + 0.15 * fused.get(mid, 0.0)
+                            ranked_ids.append(nb["id"])
+            except Exception: pass
         ranked_ids = self._apply_kind_quotas(ranked_ids, by_id, max(1, limit))
         result = []
         for memory_id in ranked_ids:
@@ -192,9 +238,26 @@ class MemoryEngine:
             if target and action == "supersede" and kind in mutable_kinds and float(target["relation_similarity"]) >= 0.55:
                 reason = decision.get("reason", "")
                 saved = self.store.add_memory(content, kind, importance, source, vector, target_id, reason, source_ref)
+                try:
+                    self.store.temporal_invalidate(target_id, saved["id"])
+                    organized = self.organize(content, kind)
+                    self.store.db.execute("UPDATE memories SET valid_at=COALESCE(valid_at,created_at), attributes_json=?, entities_json=?, provenance_json=? WHERE id=?",
+                        (__import__("json").dumps(organized, ensure_ascii=False), __import__("json").dumps(organized["entities"], ensure_ascii=False), __import__("json").dumps({"source": source, "source_ref": source_ref, "supersedes": target_id}, ensure_ascii=False), saved["id"]))
+                    self.store.db.commit()
+                    self.auto_link(saved["id"], organized["entities"])
+                    saved = self.store.memory(saved["id"]) or saved
+                except Exception: pass
                 return MemoryWriteResult("superseded", saved, target_id, reason)
 
         saved = self.store.add_memory(content, kind, importance, source, vector, source_ref=source_ref)
+        try:
+            organized = self.organize(content, kind)
+            self.store.db.execute("UPDATE memories SET valid_at=COALESCE(valid_at,created_at), attributes_json=?, entities_json=?, provenance_json=? WHERE id=?",
+                (__import__("json").dumps(organized, ensure_ascii=False), __import__("json").dumps(organized["entities"], ensure_ascii=False), __import__("json").dumps({"source": source, "source_ref": source_ref}, ensure_ascii=False), saved["id"]))
+            self.store.db.commit()
+            self.auto_link(saved["id"], organized["entities"])
+            saved = self.store.memory(saved["id"]) or saved
+        except Exception: pass
         return MemoryWriteResult("created", saved, reason="independent memory")
 
     def refresh_markdown(self) -> str:
