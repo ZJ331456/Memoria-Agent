@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { HistoryIcon, RotateCcwIcon, SaveIcon } from 'lucide-react'
-import { api, type Memory, type MemoryKind, type MemoryTimelineEntry } from './api'
+import { api, type Memory, type MemoryDetail, type MemoryKind, type MemoryTimelineEntry } from './api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
@@ -20,6 +20,7 @@ export function MemoryReviewPanel({ memory, onCorrect, onSource, onError }: {
   onError: (error: unknown) => void
 }) {
   const [versions, setVersions] = useState<MemoryTimelineEntry[]>([])
+  const [detail, setDetail] = useState<MemoryDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [draft, setDraft] = useState<Correction>({ content: memory.content, kind: memory.kind, importance: memory.importance, reason: '' })
@@ -29,6 +30,9 @@ export function MemoryReviewPanel({ memory, onCorrect, onSource, onError }: {
     setLoading(true)
     api.memoryTimeline(memory.id)
       .then(items => { if (!cancelled) setVersions(items) })
+    api.memoryDetail(memory.id)
+      .then(item => { if (!cancelled) setDetail(item) })
+      .catch(() => { if (!cancelled) setDetail(null) })
       .catch(error => { if (!cancelled) onError(error) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -48,6 +52,11 @@ export function MemoryReviewPanel({ memory, onCorrect, onSource, onError }: {
 
   return <section className="memory-review" data-testid="memory-review" aria-label="检查并纠正记忆">
     <div className="memory-current"><div className="memory-current-meta"><Badge>当前有效</Badge><span>{memory.kind} · 重要度 {memory.importance}/5</span></div><p>{memory.content}</p><small>来源：{memory.source}{memory.source_ref && ['conversation', 'reviewed_conversation'].includes(memory.source) ? <> · <button type="button" className="source-ref-link" onClick={() => onSource(memory.source_ref!)} title="查看原始对话">{memory.source_ref}</button></> : memory.source_ref ? ` · ${memory.source_ref}` : ''}</small></div>
+    {(memory.entities?.length || memory.valid_at || detail) && <div className="memory-graph" data-testid="memory-graph" aria-label="记忆关联与演化">
+      {(memory.entities?.length || memory.valid_at || memory.invalid_at) && <div className="memory-temporal"><small>有效期：{memory.valid_at ? date(memory.valid_at) : date(memory.created_at)} → {memory.invalid_at ? date(memory.invalid_at) : '至今有效'}</small>{(memory.entities?.length ?? 0) > 0 && <small> · 实体：{memory.entities!.join('、')}</small>}</div>}
+      {(detail?.neighbors?.length ?? 0) > 0 && <div className="memory-neighbors"><span>关联记忆（{detail!.neighbors.length}）</span><ul>{detail!.neighbors.slice(0, 5).map(neighbor => <li key={neighbor.id}><small>{neighbor.kind} · {neighbor.link_relation ?? '相关'}</small><p>{neighbor.content}</p></li>)}</ul></div>}
+      {(detail?.evolutions?.length ?? 0) > 0 && <div className="memory-evolutions"><span>演化记录（{detail!.evolutions.length}）</span><ul>{detail!.evolutions.map(evolution => <li key={evolution.id}><small>{date(evolution.created_at)}</small><p>{evolution.summary}</p></li>)}</ul></div>}
+    </div>}
     <div className="memory-edit-heading"><h3>修改这条记忆</h3><p>改好内容并填写原因，再点击下方的「保存纠正」。</p></div>
     <FieldGroup>
       <Field><FieldLabel htmlFor="correction-content">纠正后的记忆</FieldLabel><Textarea id="correction-content" maxLength={4000} value={draft.content} onChange={event => setDraft({ ...draft, content: event.target.value })} /></Field>

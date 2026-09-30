@@ -1,7 +1,10 @@
 export type Session={id:string;title:string;created_at:string;updated_at:string;message_count:number}
 export type Message={id:string;session_id:string;role:'user'|'assistant';content:string;created_at:string}
 export type MemoryKind='fact'|'preference'|'profile'|'goal'|'procedure'
-export type Memory={id:string;content:string;kind:MemoryKind;importance:number;source:string;source_ref?:string|null;created_at:string;updated_at:string;status:'active'|'superseded';reinforcement:number;supersedes_id:string|null;last_reinforced_at:string|null}
+export type Memory={id:string;content:string;kind:MemoryKind;importance:number;source:string;source_ref?:string|null;created_at:string;updated_at:string;status:'active'|'superseded';reinforcement:number;supersedes_id:string|null;last_reinforced_at:string|null;valid_at?:string|null;invalid_at?:string|null;attributes?:Record<string,unknown>;entities?:string[];provenance?:Record<string,unknown>;link_relation?:string}
+export type MemoryLink={id:string;from_id:string;to_id:string;relation:string;weight:number;created_at:string}
+export type MemoryEvolution={id:string;memory_id:string;summary:string;created_at:string}
+export type MemoryDetail=Memory&{neighbors:Memory[];evolutions:MemoryEvolution[]}
 export type MemoryTimelineEntry=Memory&{replacement_reason:string|null;replacement_relation:string|null}
 export type MemoryReindex={enabled:boolean;indexed:number;remaining:number}
 export type MemoryWrite={action:'created'|'reinforced'|'superseded';memory:Memory;previous_id:string|null;reason:string}
@@ -35,6 +38,11 @@ export const api={
  chatStream, cancelChat:(id:string)=>call<{status:'cancelled'|'idle';session_id:string}>(`/api/sessions/${id}/cancel`,{method:'POST'}),
  memories:(q='')=>call<Memory[]>(`/api/memories?q=${encodeURIComponent(q)}`), createMemory:(data:{content:string;kind:MemoryKind;importance:number})=>call<MemoryWrite>('/api/memories',{method:'POST',body:JSON.stringify(data)}),
  memoryTimeline:(id:string)=>call<MemoryTimelineEntry[]>(`/api/memories/${encodeURIComponent(id)}/timeline`),
+ memoryDetail:(id:string)=>call<MemoryDetail>(`/api/memories/${encodeURIComponent(id)}`),
+ memoryNeighbors:(id:string,depth=1)=>call<Memory[]>(`/api/memories/${encodeURIComponent(id)}/neighbors?depth=${depth}`),
+ memoryEvolutions:(id:string)=>call<MemoryEvolution[]>(`/api/memories/${encodeURIComponent(id)}/evolutions`),
+ timeTravel:(asOf:string,query='',limit=50)=>call<Memory[]>(`/api/memories/time-travel?as_of=${encodeURIComponent(asOf)}&q=${encodeURIComponent(query)}&limit=${limit}`),
+ evolveMemory:(id:string,data:{new_info:string;reason?:string})=>call<Memory>(`/api/memories/${encodeURIComponent(id)}/evolve`,{method:'POST',body:JSON.stringify(data)}),
  correctMemory:(id:string,data:{content:string;kind:MemoryKind;importance:number;reason:string})=>call<Memory>(`/api/memories/${encodeURIComponent(id)}/correct`,{method:'POST',body:JSON.stringify(data)}),
  reindexMemories:(limit=1000)=>call<MemoryReindex>(`/api/memories/reindex?limit=${limit}`,{method:'POST'}),
  memoryJobs:(limit=50)=>call<MemoryJob[]>(`/api/memory-jobs?limit=${limit}`), retryMemoryJob:(id:string)=>call<MemoryJob>(`/api/memory-jobs/${id}/retry`,{method:'POST'}),

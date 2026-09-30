@@ -25,3 +25,8 @@
 - 无 LLM decider 时，`remember()` 对 preference/profile/goal/procedure 做矛盾检测（否定词翻转 + 文本相似度≥0.45），命中则自动 supersede + `temporal_invalidate` + evolution 记录（Graphiti 式矛盾解决的轻量版）。
 - `MemoryResponse` 新增 `valid_at/invalid_at/attributes/entities/provenance`；新增 `GET /api/memories/{id}` 详情聚合（本体 + neighbors + evolutions）。
 - 回归：`test_round14_bm25_contradiction_and_detail`（喜欢咖啡→不喜欢咖啡自动替代、invalid_at 非空、检索命中、演化链非空）。
+
+## 前端更新（第十四轮补）
+- `api.ts`：`Memory` 新增 `valid_at/invalid_at/attributes/entities/provenance/link_relation`；新增 `memoryDetail/memoryNeighbors/memoryEvolutions/timeTravel/evolveMemory` 五个调用。
+- `MemoryReviewPanel`：检查对话框新增"关联与演化"区——有效期（valid_at → invalid_at/至今有效）、实体词、关联记忆（kind + relation + 内容，最多 5 条）、演化记录全文。
+- 校验：`tsc --noEmit` 通过；后端 17 个测试全过。
