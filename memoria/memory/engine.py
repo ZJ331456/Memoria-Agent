@@ -81,7 +81,8 @@ class MemoryEngine:
         return result.memory
 
     async def retrieve(self, query: str, limit: int = 8, kinds: set[str] | None = None, as_of: str | None = None, expand_graph: bool = True) -> list[dict]:
-        lexical_seed = self.store.keyword_memory_candidates(query, limit=200) if query.strip() else []
+        lexical_query = self._lexical_query(query)
+        lexical_seed = self.store.keyword_memory_candidates(lexical_query, limit=200) if lexical_query else []
         indexed = self.store.vector_index_status["enabled"]
         items = self.store.memories(limit=200 if indexed else self.vector_scan_limit)
         if kinds:
@@ -117,8 +118,8 @@ class MemoryEngine:
                     vector = item.get("embedding")
                     if vector and len(vector) == len(query_vector):
                         vector_scores[item["id"]] = self._cosine(query_vector, vector)
-        query_tokens = self._tokens(query)
-        lexical_scores = {item["id"]: self._lexical_score(query, query_tokens, item) for item in items}
+        query_tokens = self._tokens(lexical_query)
+        lexical_scores = {item["id"]: self._lexical_score(lexical_query, query_tokens, item) for item in items}
         lexical_ids = {item["id"] for item in lexical_seed}
         lexical = sorted(
             (item for item in items if lexical_scores[item["id"]] > 0 or item["id"] in lexical_ids),
@@ -359,6 +360,12 @@ class MemoryEngine:
         return any(n in ax for n in neg) != any(n in bx for n in neg)
 
     @staticmethod
+    def _lexical_query(query: str) -> str:
+        """Drop trailing question words before making character n-gram matches."""
+        cleaned = re.sub(r"[?？!！。．.\s]+$", "", query.strip())
+        return re.sub(r"(?:是)?什么(?:呢|呀|啊)?$", "", cleaned).strip()
+
+    @staticmethod
     def _tokens(text: str) -> set[str]:
         lowered = text.lower()
         tokens = set(re.findall(r"[a-z0-9_]{2,}", lowered))
@@ -373,7 +380,7 @@ class MemoryEngine:
         text = item["content"].lower()
         item_tokens = cls._tokens(text)
         overlap = len(query_tokens & item_tokens)
-        exact = 8 if query.lower().strip() in text else 0
+        exact = 8 if query.strip() and query.lower().strip() in text else 0
         type_bonus = 0.3 if item["kind"] in {"preference", "profile"} else 0
         return overlap * 2 + exact + int(item["importance"]) * 0.05 + type_bonus if overlap or exact else 0
 

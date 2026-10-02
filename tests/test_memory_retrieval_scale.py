@@ -44,3 +44,12 @@ def test_question_suffix_does_not_promote_unrelated_goal(tmp_path):
     results = asyncio.run(MemoryEngine(store).retrieve("十月的运动目标是什么？", limit=2))
 
     assert results[0]["id"] == marathon["id"]
+
+
+@pytest.mark.parametrize("query", ["是什么？", "什么呢？"])
+def test_question_without_fact_clues_does_not_match_every_memory(tmp_path, query):
+    store = Store(tmp_path / "no_clue.db", vector_backend="json")
+    store.add_memory("用户计划在十月完成第一次马拉松", "goal", 4, "test")
+
+    assert asyncio.run(MemoryEngine(store).retrieve(query, limit=2)) == []
+    store.close()
