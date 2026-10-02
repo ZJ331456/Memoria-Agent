@@ -2,23 +2,23 @@
 
 # Memoria Agent
 
-**一个让你能检查并纠正记忆的本地个人 Agent。** 它会在对话中使用长期记忆，也把记忆的来源、变化和纠正过程交还给你。
+**一个可审核、可追溯、可授权给多个 Agent 使用的本地记忆系统。** 它让人决定哪些事实能成为共享记忆、谁能读取，以及何时纠正或撤销。个人 Agent 工作台仍可用来产生和检查记忆。
 
-> 对话 → 提取候选 → 查看原话并审核 → 检查或纠正记忆 → 在后续对话中使用当前版本
+> Agent 提案 → 人工审核 → 按空间授权共享 → 冲突版本确认 → 撤销与审计
 
-Memoria 面向本地单用户使用。会话和记忆保存在本机 SQLite；模型请求发送到你配置的 OpenAI 兼容服务。
+Memoria 默认本地运行，数据保存在 SQLite；只有聊天和自动提取等模型能力会请求你配置的 OpenAI 兼容服务。共享记忆治理 API 不依赖模型即可运行。
 
 ## 你能做什么
 
-- **持续对话**：多会话保存、流式回复、停止生成，以及超出上下文窗口时的会话摘要。
+- **治理共享记忆**：为 Agent 创建独立密钥和私有/共享空间；按 reader、contributor、curator 授权；提案须审核，批准前不会进入共享检索。
+- **控制版本与生命周期**：同主题冲突需要显式确认被替代版本；过期、撤销与授权变更会立即影响共享检索，保留可审计的来源和事件。
 - **审核长期记忆**：对话提取的事实和偏好先进入审核队列；查看原始消息、修改候选，再批准或拒绝。批准前不会参与召回。
 - **检查并纠正**：在记忆库点击后立即打开独立编辑窗口；从来源 ID 跳回原始对话，查看版本链，填写原因后生成纠正版。旧版本保留，只有当前有效版本参与召回。
-- **使用工具**：内置记忆、历史搜索、计算和网页读取工具；Tool Search 按需暴露工具，MCP 可接入外部服务。
-- **了解运行过程**：Dashboard 展示记忆任务、工具调用和运行追踪；可选的 Drift 在空闲时按预算执行限定技能。
+- **持续对话与工具**：多会话、流式回复、记忆召回、工具循环与 MCP；Dashboard 展示任务和 trace，Drift 可在空闲时运行限定技能。
 
 ## 快速开始
 
-需要 **Python 3.11+**、**Node.js/npm**、Git，以及一个 OpenAI 兼容的聊天模型接口。以下命令适用于 Linux/macOS；Windows 可使用 WSL。
+需要 **Python 3.11+**、**Node.js/npm** 和 Git；使用聊天或自动提取时还需要一个 OpenAI 兼容的模型接口。以下命令适用于 Linux/macOS；Windows 可使用 WSL。
 
 ```bash
 git clone https://github.com/ZJ331456/Memoria-Agent.git
@@ -33,6 +33,8 @@ npm run build --prefix frontend
 
 打开 <http://127.0.0.1:2237>。首次进入会提示配置主模型的 **Model、Base URL 和 API Key**；可以在页面中测试连接。快速模型和 Embedding 模型可稍后配置。未配置 Embedding 时仍可使用词面记忆检索。
 
+想先体验共享记忆治理，可直接打开「共享记忆治理」页：创建 Agent 并保存一次性密钥，用该身份创建空间，再给其他 Agent 授权并提交、审核提案。此流程不要求先配置模型。Agent 密钥只在页面内存中使用，刷新后需重新粘贴。
+
 模型设置保存在被 Git 忽略的 `data/models.override.toml`，API 不回显密钥。也可以复制 `config.example.toml` 为 `config.toml`，用环境变量配置模型和运行选项。
 
 ## 第一次使用
@@ -42,6 +44,8 @@ npm run build --prefix frontend
 3. 在「记忆 → 有效记忆库」点击「检查并纠正」，编辑窗口会立即出现并聚焦内容输入框；填写修改原因后保存，新版本生效，旧版本留在时间线中。
 
 「记忆 → 存储与任务」提供 Markdown 视图和后台抽取记录：`MEMORY.md` 从有效记忆生成，`SELF.md` 可由用户编辑并注入上下文。未保存的 Markdown 修改会暂存在当前浏览器标签页，保存文件后清除；旧的 `PENDING.md` 仍可查看，新的审核队列以 SQLite 为准。
+
+旧聊天记忆与新共享空间分开存放；只有管理员显式导入并完成共享提案审核后，旧记忆才会出现在共享检索。当前多 Agent 隔离针对共享记忆接口，旧聊天运行时仍面向本地单用户。
 
 ## 可选能力
 
@@ -61,12 +65,26 @@ npm run build --prefix frontend
 ```bash
 .venv/bin/python -m pip install pytest
 .venv/bin/python -m pytest -q
+.venv/bin/python -m eval.run_governance
 npm run build --prefix frontend
 (cd frontend && npx playwright install chromium)
 npm run test:e2e --prefix frontend
 ```
 
 前端开发可另开终端运行 `npm run dev --prefix frontend`，Vite 会将 `/api` 代理到本地后端。
+
+## 评测
+
+仓库提供 24 条无需模型的治理回归案例，以及独立的本地容量与延迟脚本：
+
+```bash
+.venv/bin/python -m eval.run_governance --min-pass-rate 1 --max-leak-rate 0
+.venv/bin/python -m eval.benchmark_shared_memory --memories 1000 --spaces 10 --queries 200
+```
+
+治理评测分别报告授权召回、隔离泄漏、生命周期、冲突审核和来源对应。本机样例为 24/24 通过、泄漏率 0；小型合成回归分数不代表真实场景的泛化能力，存储层延迟也不包含 HTTP 或模型调用。
+
+公开数据可优先选择 [GateMem](https://github.com/rzhub/GateMem) 评估共享记忆的授权和遗忘，再用 [LongMemEval](https://github.com/xiaowu0162/LongMemEval) 的固定小样本评估知识更新与拒答，或用 [LoCoMo](https://github.com/snap-research/locomo) 的证据 ID 评估跨会话来源召回。本仓库尚未发布这些公开集的正式成绩。
 
 ## Related Projects
 

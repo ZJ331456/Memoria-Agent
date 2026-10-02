@@ -2,7 +2,9 @@
 
 ## 1. 文档范围
 
-本文描述 Memoria Agent `0.11.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
+本文描述 Memoria Agent `0.12.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、共享记忆治理、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
+
+共享记忆的数据流、权限边界和评测方法见 [记忆治理与多 Agent 共享记忆](./记忆治理与多Agent共享记忆.md)。
 
 - 默认地址：`http://127.0.0.1:2237`
 - API 前缀：`/api`
@@ -18,7 +20,7 @@
 
 ### 2.2 可选认证与安全限制
 
-配置 `[server.security].api_token` 后，除 `/api/health` 外的 API 和 `/metrics` 必须携带 `Authorization: Bearer <token>` 或 `X-API-Key`。不安全方法带有 Origin 时必须匹配 `allowed_origins`。还可配置每 IP 每分钟限流和请求体上限。前端使用 `VITE_MEMORIA_API_TOKEN`，不要把真实值提交到 Git。
+配置 `[server.security].api_token` 后，除 `/api/health` 和独立认证的 `/api/shared/*` 外，API 与 `/metrics` 必须携带 `Authorization: Bearer <token>` 或 `X-API-Key`。`/api/shared/*` 始终要求 `X-Agent-Key`，并在存储层按 Agent 与空间角色鉴权；全局 API Token 不能代替 Agent key。治理管理员接口 `/api/governance/*` 使用全局 Token；未配置时仅允许本机回环连接。不安全方法带有 Origin 时必须匹配 `allowed_origins`。还可配置每 IP 每分钟限流和请求体上限。前端使用 `VITE_MEMORIA_API_TOKEN`，不要把真实值提交到 Git。
 
 ### 2.3 错误结构
 
@@ -48,7 +50,7 @@
 最小存活检查，不访问模型。
 
 ```json
-{"status":"ok","version":"0.11.0"}
+{"status":"ok","version":"0.12.0"}
 ```
 
 ### `GET /api/overview`
@@ -315,7 +317,38 @@ curl -s "$BASE/api/traces?session_id=$SESSION"
 |---|---|
 | 对话实验室 | sessions、messages、chat/stream、cancel |
 | 长期记忆 | memories GET/POST/PATCH/DELETE/correct/timeline/reindex/undo、memory-reviews、memory-jobs、message source |
+| 共享记忆治理 | governance/agents、shared/spaces、grants、proposals、memories、events |
 | 运行追踪 | overview、traces |
 | 工具实验台 | tools、tools execute |
 
 生产部署时应在 `[server.security]` 启用 API Token、限定 `allowed_origins`、设置限流和请求体上限，并由反向代理补充 TLS 与访问日志脱敏。默认配置为了本地开发兼容仍不启用 Token，因此不能直接裸露到公网。
+
+## 11. 记忆治理与多 Agent 共享 API
+
+这是独立于旧个人记忆表的受控空间。`/api/governance/*` 是管理员接口；`/api/shared/*` 必须使用 `X-Agent-Key`。管理员创建 Agent 返回的 `token` **仅出现一次**，列表只含 `id/name/enabled/created_at`。禁用 Agent 后原 key 立即失效。
+
+| 方法 | 路径 | 请求 / 说明 |
+| --- | --- | --- |
+| POST | `/api/governance/agents` | `{"name":"research-agent"}`，创建并一次返回 key。 |
+| GET | `/api/governance/agents` | 管理员列出 Agent 元数据，不返回 key 或哈希。 |
+| DELETE | `/api/governance/agents/{agent_id}` | 禁用 Agent key，成功 204。 |
+| POST | `/api/governance/agents/{agent_id}/rotate-key` | 管理员轮换 key 并恢复启用，新 token 只返回一次、旧 token 立即失效，保留原有授权。 |
+| POST | `/api/governance/spaces/{space_id}/import-memory/{memory_id}` | `{"actor_id":"owner-id","topic_key":"project:fact"}`，旧库有效记忆变为待审提案。 |
+| POST / GET | `/api/shared/spaces` | 创建 `{"name":"研发","visibility":"shared|private"}` / 列出本 Agent 可见空间，返回 `access_role`。 |
+| GET / POST | `/api/shared/spaces/{space_id}/grants` | owner/curator 查看授权；只有 owner 能通过 `{"agent_id":"...","role":"reader|contributor|curator"}` 授权。 |
+| DELETE | `/api/shared/spaces/{space_id}/grants/{member_id}` | owner 撤销授权。私有空间不能授权。 |
+| POST | `/api/shared/proposals` | 提交 `space_id/content/kind/importance/topic_key/source_type/source_ref/expires_at`；状态始终先为 `pending`。 |
+| GET | `/api/shared/proposals?space_id=...&status=pending` | owner/curator 查看空间队列；contributor 只看自己提案；reader 无权访问。状态还可取 `approved/rejected/all`。 |
+| POST | `/api/shared/proposals/{id}/approve` | owner/curator 发送 `{"reason":"已核对","expected_replaces_id":null}`。同主题已有不同内容时必须填当前有效记忆 ID；旧 ID 返回 409。 |
+| POST | `/api/shared/proposals/{id}/reject` | owner/curator 发送 `{"reason":"证据不足"}`。 |
+| GET | `/api/shared/memories?space_id=...&q=...&limit=100` | 只返回当前有读权限且已批准、未过期、未撤销的版本；省略 `space_id` 时搜索全部可见空间。 |
+| GET | `/api/shared/memories/{id}` | 按空间 ACL 查询详情。普通成员按 ID 也无法读取已撤销或过期正文。 |
+| GET | `/api/shared/memories/{id}/lineage` | 查询同空间同主题版本链；普通成员看不到已撤销/过期版本正文，curator/owner 可审计。 |
+| POST | `/api/shared/memories/{id}/revoke` | owner/curator 发送 `{"reason":"不再适用"}`，同时撤销同空间同主题旧版本，普通成员不能通过旧 ID 找回正文；保留治理审计。 |
+| GET | `/api/shared/events?space_id=...&limit=100` | 仅 owner/curator 可读的追加式治理事件。 |
+
+提案列表返回实时 `conflict_memory_id` 和提交时的 `submitted_conflict_memory_id`，供审核界面标明变化。内容或来源、有效期等字段变化均要求版本 CAS；完全一致的提案才会 `confirm`。审批会重新验证提交者权限，旧记忆导入还会复验来源存在且有效，失效时返回 409。
+
+记忆返回 `proposal_id`、`proposer_agent_id`、`approved_by`、`source_type`、`source_ref`、`version`、`supersedes_id` 和状态；详情与版本链还返回 `effective_status`，过期记忆显示为 `expired`。审批响应带 `action=activate|supersede|confirm`。`source_ref` 是来源指针，不会自动证明外部材料真实，也不授权读取旧个人会话。所有新请求体拒绝未知字段，审核与撤销理由必须包含非空白文字。
+
+该层是单机、按 Agent key 与空间角色隔离的共享记忆服务。旧 `/api/memories`、聊天工具和来源消息 API 仍属于本地个人数据域，不应通过其路由读取共享层内容，也不能用它们证明多 Agent 隔离。
