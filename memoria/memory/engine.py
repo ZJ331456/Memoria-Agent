@@ -249,9 +249,10 @@ class MemoryEngine:
                 try:
                     self.store.temporal_invalidate(target_id, saved["id"])
                     organized = self.organize(content, kind)
-                    self.store.db.execute("UPDATE memories SET valid_at=COALESCE(valid_at,created_at), attributes_json=?, entities_json=?, provenance_json=? WHERE id=?",
-                        (__import__("json").dumps(organized, ensure_ascii=False), __import__("json").dumps(organized["entities"], ensure_ascii=False), __import__("json").dumps({"source": source, "source_ref": source_ref, "supersedes": target_id}, ensure_ascii=False), saved["id"]))
-                    self.store.db.commit()
+                    with self.store.lock:
+                        self.store.db.execute("UPDATE memories SET valid_at=COALESCE(valid_at,created_at), attributes_json=?, entities_json=?, provenance_json=? WHERE id=?",
+                            (__import__("json").dumps(organized, ensure_ascii=False), __import__("json").dumps(organized["entities"], ensure_ascii=False), __import__("json").dumps({"source": source, "source_ref": source_ref, "supersedes": target_id}, ensure_ascii=False), saved["id"]))
+                        self.store.db.commit()
                     self.auto_link(saved["id"], organized["entities"])
                     saved = self.store.memory(saved["id"]) or saved
                 except Exception: pass
@@ -270,9 +271,10 @@ class MemoryEngine:
         saved = self.store.add_memory(content, kind, importance, source, vector, source_ref=source_ref)
         try:
             organized = self.organize(content, kind)
-            self.store.db.execute("UPDATE memories SET valid_at=COALESCE(valid_at,created_at), attributes_json=?, entities_json=?, provenance_json=? WHERE id=?",
-                (__import__("json").dumps(organized, ensure_ascii=False), __import__("json").dumps(organized["entities"], ensure_ascii=False), __import__("json").dumps({"source": source, "source_ref": source_ref}, ensure_ascii=False), saved["id"]))
-            self.store.db.commit()
+            with self.store.lock:
+                self.store.db.execute("UPDATE memories SET valid_at=COALESCE(valid_at,created_at), attributes_json=?, entities_json=?, provenance_json=? WHERE id=?",
+                    (__import__("json").dumps(organized, ensure_ascii=False), __import__("json").dumps(organized["entities"], ensure_ascii=False), __import__("json").dumps({"source": source, "source_ref": source_ref}, ensure_ascii=False), saved["id"]))
+                self.store.db.commit()
             self.auto_link(saved["id"], organized["entities"])
             saved = self.store.memory(saved["id"]) or saved
         except Exception: pass

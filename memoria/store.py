@@ -516,7 +516,8 @@ class Store:
 
     @property
     def vector_index_status(self) -> dict[str, Any]:
-        return {"enabled": self.vector_index.enabled, "backend": "sqlite-vec" if self.vector_index.enabled else "json", "dimension": self.vector_index.dimension, "error": self.vector_index.error}
+        with self.lock:
+            return {"enabled": self.vector_index.enabled, "backend": "sqlite-vec" if self.vector_index.enabled else "json", "dimension": self.vector_index.dimension, "error": self.vector_index.error}
 
     @staticmethod
     def _memory(item: dict[str, Any]) -> dict[str, Any]:
