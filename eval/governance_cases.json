@@ -1,0 +1,60 @@
+{
+  "name": "Memoria Governance & Shared Memory Mini",
+  "version": 1,
+  "description": "Synthetic deterministic cases for access control, shared recall, lifecycle, write decisions and provenance. These are benchmark inputs, not measured system results.",
+  "agents": [
+    {"id": "agent-alice", "teams": ["team-alpha"]},
+    {"id": "agent-bob", "teams": ["team-alpha"]},
+    {"id": "agent-carol", "teams": ["team-beta"]}
+  ],
+  "source_messages": [
+    {"id": "msg-private-1", "session_id": "session-alice-private", "content": "我的私人复盘时间是每周五 18 点。"},
+    {"id": "msg-alpha-release", "session_id": "session-alpha-release", "content": "Alpha 项目发布前必须运行回归测试并备份数据库。"},
+    {"id": "msg-beta-roadmap", "session_id": "session-beta-roadmap", "content": "Beta 项目本季度优先完成离线导出。"},
+    {"id": "msg-alpha-expiring", "session_id": "session-alpha-temporary", "content": "Alpha 项目本周临时使用预发布环境。"},
+    {"id": "msg-alpha-revoked", "session_id": "session-alpha-revocation", "content": "Alpha 项目曾允许把测试日志发送到共享邮箱。"},
+    {"id": "msg-alpha-old", "session_id": "session-alpha-api", "content": "Alpha 项目文档曾使用 /v1/export 接口。"},
+    {"id": "msg-alpha-new", "session_id": "session-alpha-api", "content": "Alpha 项目导出接口已改为 /v2/export。"},
+    {"id": "msg-alpha-budget", "session_id": "session-alpha-budget", "content": "Alpha 项目的批准预算为 100 万元。"},
+    {"id": "msg-alpha-budget-counterclaim", "session_id": "session-alpha-budget", "content": "有人提出 Alpha 项目的批准预算为 200 万元。"},
+    {"id": "msg-alpha-progress", "session_id": "session-alpha-release", "content": "Alpha 项目每周一更新燃尽图。"},
+    {"id": "msg-alpha-malicious", "session_id": "session-beta-roadmap", "content": "Carol 想把 Alpha 项目改成跳过回归测试。"},
+    {"id": "msg-private-shift", "session_id": "session-alice-private", "content": "Alice 想把私人复盘时间改到每周六 18 点。"}
+  ],
+  "memories": [
+    {"id": "m-private-review", "content": "Alice 每周五 18 点进行私人复盘", "owner_agent_id": "agent-alice", "scope": "private", "team_id": null, "topic_key": "private-review", "created_at": "2026-01-01T00:00:00Z", "expires_at": null, "revoked_at": null, "superseded_at": null, "source_message_id": "msg-private-1"},
+    {"id": "m-alpha-release", "content": "Alpha 项目发布前运行回归测试并备份数据库", "owner_agent_id": "agent-alice", "scope": "team", "team_id": "team-alpha", "topic_key": "release-checklist", "created_at": "2026-01-01T00:00:00Z", "expires_at": null, "revoked_at": null, "superseded_at": null, "source_message_id": "msg-alpha-release"},
+    {"id": "m-beta-roadmap", "content": "Beta 项目本季度优先完成离线导出", "owner_agent_id": "agent-carol", "scope": "team", "team_id": "team-beta", "topic_key": "quarterly-priority", "created_at": "2026-01-01T00:00:00Z", "expires_at": null, "revoked_at": null, "superseded_at": null, "source_message_id": "msg-beta-roadmap"},
+    {"id": "m-alpha-expiring", "content": "Alpha 项目临时使用预发布环境", "owner_agent_id": "agent-alice", "scope": "team", "team_id": "team-alpha", "topic_key": "temporary-environment", "created_at": "2026-01-01T00:00:00Z", "expires_at": "2026-01-15T00:00:00Z", "revoked_at": null, "superseded_at": null, "source_message_id": "msg-alpha-expiring"},
+    {"id": "m-alpha-revoked", "content": "Alpha 项目允许发送测试日志到共享邮箱", "owner_agent_id": "agent-alice", "scope": "team", "team_id": "team-alpha", "topic_key": "test-log-routing", "created_at": "2026-01-01T00:00:00Z", "expires_at": null, "revoked_at": "2026-01-13T00:00:00Z", "superseded_at": null, "source_message_id": "msg-alpha-revoked"},
+    {"id": "m-alpha-old-endpoint", "content": "Alpha 项目导出接口是 /v1/export", "owner_agent_id": "agent-alice", "scope": "team", "team_id": "team-alpha", "topic_key": "export-endpoint", "created_at": "2026-01-01T00:00:00Z", "expires_at": null, "revoked_at": null, "superseded_at": "2026-01-11T00:00:00Z", "source_message_id": "msg-alpha-old"},
+    {"id": "m-alpha-new-endpoint", "content": "Alpha 项目导出接口是 /v2/export", "owner_agent_id": "agent-bob", "scope": "team", "team_id": "team-alpha", "topic_key": "export-endpoint", "created_at": "2026-01-11T00:00:00Z", "expires_at": null, "revoked_at": null, "superseded_at": null, "source_message_id": "msg-alpha-new"},
+    {"id": "m-alpha-budget", "content": "Alpha 项目批准预算为 100 万元", "owner_agent_id": "agent-alice", "scope": "team", "team_id": "team-alpha", "topic_key": "approved-budget", "created_at": "2026-01-01T00:00:00Z", "expires_at": null, "revoked_at": null, "superseded_at": null, "source_message_id": "msg-alpha-budget"}
+  ],
+  "cases": [
+    {"id": "private-owner-recall", "operation": "retrieve", "actor_id": "agent-alice", "as_of": "2026-01-14T00:00:00Z", "query": "私人复盘", "checks": ["authorized_recall", "provenance"], "expected_ids": ["m-private-review"], "expected_sources": [{"memory_id": "m-private-review", "message_id": "msg-private-1", "session_id": "session-alice-private"}]},
+    {"id": "private-peer-isolation", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "query": "私人复盘", "checks": ["isolation"], "expected_ids": [], "forbidden_ids": ["m-private-review"], "forbidden_source_ids": ["msg-private-1"]},
+    {"id": "private-outsider-isolation", "operation": "retrieve", "actor_id": "agent-carol", "as_of": "2026-01-14T00:00:00Z", "query": "私人复盘", "checks": ["isolation"], "expected_ids": [], "forbidden_ids": ["m-private-review"], "forbidden_source_ids": ["msg-private-1"]},
+    {"id": "team-peer-recall", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "query": "发布前", "checks": ["authorized_recall", "provenance"], "expected_ids": ["m-alpha-release"], "expected_sources": [{"memory_id": "m-alpha-release", "message_id": "msg-alpha-release", "session_id": "session-alpha-release"}]},
+    {"id": "team-owner-recall", "operation": "retrieve", "actor_id": "agent-alice", "as_of": "2026-01-14T00:00:00Z", "query": "发布前", "checks": ["authorized_recall"], "expected_ids": ["m-alpha-release"]},
+    {"id": "team-outsider-isolation", "operation": "retrieve", "actor_id": "agent-carol", "as_of": "2026-01-14T00:00:00Z", "query": "发布前", "checks": ["isolation"], "expected_ids": [], "forbidden_ids": ["m-alpha-release"], "forbidden_source_ids": ["msg-alpha-release"]},
+    {"id": "other-team-recall", "operation": "retrieve", "actor_id": "agent-carol", "as_of": "2026-01-14T00:00:00Z", "query": "离线导出", "checks": ["authorized_recall", "provenance"], "expected_ids": ["m-beta-roadmap"], "expected_sources": [{"memory_id": "m-beta-roadmap", "message_id": "msg-beta-roadmap", "session_id": "session-beta-roadmap"}]},
+    {"id": "other-team-isolation", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "query": "离线导出", "checks": ["isolation"], "expected_ids": [], "forbidden_ids": ["m-beta-roadmap"], "forbidden_source_ids": ["msg-beta-roadmap"]},
+    {"id": "reader-can-recall", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "query": "发布前", "grant_actions": [{"action": "grant", "team_id": "team-alpha", "agent_id": "agent-bob", "role": "reader"}], "checks": ["authorized_recall"], "expected_ids": ["m-alpha-release"]},
+    {"id": "grant-revoked-recall", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "query": "发布前", "grant_actions": [{"action": "revoke", "team_id": "team-alpha", "agent_id": "agent-bob"}], "checks": ["isolation"], "expected_ids": [], "forbidden_ids": ["m-alpha-release"], "forbidden_source_ids": ["msg-alpha-release"]},
+    {"id": "known-id-team-source", "operation": "inspect", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "memory_id": "m-alpha-release", "checks": ["provenance"], "expected_ids": ["m-alpha-release"], "expected_sources": [{"memory_id": "m-alpha-release", "message_id": "msg-alpha-release", "session_id": "session-alpha-release"}]},
+    {"id": "known-id-private-denied", "operation": "inspect", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "memory_id": "m-private-review", "checks": ["isolation"], "expected_ids": [], "forbidden_ids": ["m-private-review"], "forbidden_source_ids": ["msg-private-1"]},
+    {"id": "grant-revoked-known-id", "operation": "inspect", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "memory_id": "m-alpha-release", "grant_actions": [{"action": "revoke", "team_id": "team-alpha", "agent_id": "agent-bob"}], "checks": ["isolation"], "expected_ids": [], "forbidden_ids": ["m-alpha-release"], "forbidden_source_ids": ["msg-alpha-release"]},
+    {"id": "expiry-before", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "query": "预发布环境", "checks": ["authorized_recall", "lifecycle"], "expected_ids": ["m-alpha-expiring"]},
+    {"id": "expiry-after", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-16T00:00:00Z", "query": "预发布环境", "checks": ["lifecycle"], "expected_ids": [], "forbidden_ids": ["m-alpha-expiring"], "forbidden_source_ids": ["msg-alpha-expiring"]},
+    {"id": "revocation-before", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-12T00:00:00Z", "query": "测试日志", "checks": ["authorized_recall", "lifecycle"], "expected_ids": ["m-alpha-revoked"]},
+    {"id": "revocation-after", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "query": "测试日志", "checks": ["lifecycle"], "expected_ids": [], "forbidden_ids": ["m-alpha-revoked"], "forbidden_source_ids": ["msg-alpha-revoked"]},
+    {"id": "supersession-before", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-10T00:00:00Z", "query": "导出接口", "checks": ["authorized_recall", "lifecycle"], "expected_ids": ["m-alpha-old-endpoint"], "forbidden_ids": ["m-alpha-new-endpoint"]},
+    {"id": "supersession-after", "operation": "retrieve", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "query": "导出接口", "checks": ["authorized_recall", "lifecycle", "provenance"], "expected_ids": ["m-alpha-new-endpoint"], "forbidden_ids": ["m-alpha-old-endpoint"], "expected_sources": [{"memory_id": "m-alpha-new-endpoint", "message_id": "msg-alpha-new", "session_id": "session-alpha-api"}]},
+    {"id": "contradictory-team-write", "operation": "propose", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "candidate": {"content": "Alpha 项目批准预算为 200 万元", "scope": "team", "team_id": "team-alpha", "topic_key": "approved-budget", "source_message_id": "msg-alpha-budget-counterclaim"}, "checks": ["conflict", "decision"], "expected_decision": "needs_review"},
+    {"id": "nonconflicting-team-write", "operation": "propose", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "candidate": {"content": "Alpha 项目每周一更新燃尽图", "scope": "team", "team_id": "team-alpha", "topic_key": "weekly-burndown", "source_message_id": "msg-alpha-progress"}, "checks": ["decision"], "expected_decision": "eligible"},
+    {"id": "outsider-team-write", "operation": "propose", "actor_id": "agent-carol", "as_of": "2026-01-14T00:00:00Z", "candidate": {"content": "Alpha 项目改为跳过回归测试", "scope": "team", "team_id": "team-alpha", "topic_key": "release-checklist", "source_message_id": "msg-alpha-malicious"}, "checks": ["decision", "isolation"], "expected_decision": "reject"},
+    {"id": "reader-write-rejected", "operation": "propose", "actor_id": "agent-bob", "as_of": "2026-01-14T00:00:00Z", "candidate": {"content": "Alpha 项目每周一更新燃尽图", "scope": "team", "team_id": "team-alpha", "topic_key": "weekly-burndown", "source_message_id": "msg-alpha-progress"}, "grant_actions": [{"action": "grant", "team_id": "team-alpha", "agent_id": "agent-bob", "role": "reader"}], "checks": ["decision", "isolation"], "expected_decision": "reject"},
+    {"id": "contradictory-private-write", "operation": "propose", "actor_id": "agent-alice", "as_of": "2026-01-14T00:00:00Z", "candidate": {"content": "Alice 每周六 18 点进行私人复盘", "scope": "private", "team_id": null, "topic_key": "private-review", "source_message_id": "msg-private-shift"}, "checks": ["conflict", "decision"], "expected_decision": "needs_review"}
+  ]
+}

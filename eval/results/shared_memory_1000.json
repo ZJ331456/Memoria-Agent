@@ -1,0 +1,35 @@
+{
+  "configuration": {
+    "memories": 1000,
+    "spaces": 10,
+    "queries": 200,
+    "seed": 331456
+  },
+  "seed_ms": 2935.161,
+  "query_phase_ms": 27.565,
+  "authorized_search_ms": {
+    "p50": 0.07,
+    "p95": 0.08,
+    "max": 0.247
+  },
+  "authorized_detail_ms": {
+    "p50": 0.026,
+    "p95": 0.031,
+    "max": 0.071
+  },
+  "unauthorized_explicit_scope": {
+    "search_denied": 200,
+    "search_attempts": 200,
+    "search_denied_rate": 1.0,
+    "detail_denied": 200,
+    "detail_attempts": 200,
+    "detail_denied_rate": 1.0
+  },
+  "measurement_date": "2026-10-02",
+  "scope": "Single process, local synchronous Python/SQLite storage; no HTTP, models, network or concurrency",
+  "environment": {
+    "python": "3.11.7",
+    "sqlite": "3.41.2",
+    "architecture": "x86_64"
+  }
+}
