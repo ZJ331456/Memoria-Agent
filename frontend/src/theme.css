@@ -156,7 +156,64 @@ body { background: #faf8f3; }
 .memory-job-meta, .memory-job-action { color: #72857e; font-size: .75rem; }
 .memory-job-main .job-error { flex-basis: 100%; }
 .metric-value { color: #1f645b; }
+.governance-page { max-width: 76rem; }
+.governance-header { padding: .35rem 0 .1rem; }
+.governance-header p { max-width: 46rem; }
+.governance-eyebrow { display: inline-flex; align-items: center; gap: .35rem; margin-bottom: .35rem; color: #27816b; font-size: .68rem; font-weight: 760; letter-spacing: .14em; }
+.governance-eyebrow svg { width: .95rem; height: .95rem; }
+.governance-top-grid, .governance-bottom-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 1rem; }
+.governance-bottom-grid { grid-template-columns: minmax(0, 1.35fr) minmax(18rem, .75fr); }
+.governance-page [data-slot="card"] { min-width: 0; border-color: #dfe9df; box-shadow: 0 10px 32px #23443b0c; }
+.governance-page [data-slot="card-title"] { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.governance-card-icon { width: 1.05rem; height: 1.05rem; color: #26856d; }
+.governance-form-stack { display: flex; flex-direction: column; gap: 1rem; }
+.governance-form-stack label, .governance-proposal-card label, .governance-revoke label { display: flex; min-width: 0; flex-direction: column; gap: .4rem; color: #4b6962; font-size: .76rem; font-weight: 650; }
+.governance-form-stack label input, .governance-form-stack label textarea, .governance-proposal-card label input, .governance-revoke label input { color: #1b3937; font-weight: 400; }
+.governance-form-stack select { height: 2.5rem; width: 100%; border: 1px solid #dddcd1; border-radius: .55rem; padding: 0 .65rem; background: #fff; color: #1b3937; font-size: .85rem; font-weight: 400; }
+.governance-form-stack textarea { min-height: 6.5rem; }
+.governance-inline-form { display: flex; align-items: end; gap: .65rem; }
+.governance-inline-form > label { flex: 1; }
+.governance-inline-form > button { flex: none; }
+.governance-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.governance-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
+.governance-actions small { color: #6d8479; font-size: .73rem; }
+.governance-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem; border-radius: .75rem; font-size: .82rem; }
+.governance-feedback span { flex: 1; overflow-wrap: anywhere; }
+.governance-error { border: 1px solid #f1bcab; background: #fff4ee; color: #9b3d2a; }
+.governance-success { border: 1px solid #b5dec4; background: #eef9f1; color: #23634c; }
+.governance-key-box, .governance-connected, .governance-space-meta { display: flex; flex-direction: column; gap: .5rem; padding: .85rem; border: 1px solid #b6dec7; border-radius: .8rem; background: #f0faf2; color: #315a4b; font-size: .78rem; }
+.governance-key-box code { display: block; padding: .65rem; border: 1px solid #d6e7d9; border-radius: .5rem; background: #fff; color: #1b5146; overflow-wrap: anywhere; user-select: all; }
+.governance-connected { flex-direction: row; align-items: center; }
+.governance-connected svg { width: 1.2rem; height: 1.2rem; flex: none; }
+.governance-connected span { flex: 1; }
+.governance-space-meta { border-color: #e2e8da; background: #f9fbf7; }
+.governance-space-meta span { overflow-wrap: anywhere; }
+.governance-grants { display: flex; flex-direction: column; gap: .35rem; }
+.governance-grants > div { display: flex; justify-content: space-between; gap: .5rem; padding: .4rem 0; border-top: 1px solid #e6eee3; }
+.governance-grants code { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.governance-section-heading { display: flex; flex-direction: row; align-items: start; justify-content: space-between; gap: 1rem; }
+.governance-proposals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: .75rem; }
+.governance-proposal-card, .governance-memory-card { display: flex; flex-direction: column; gap: .75rem; min-width: 0; padding: 1rem; border: 1px solid #dce9df; border-radius: .85rem; background: #fcfefb; }
+.governance-card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; color: #668079; font-size: .72rem; }
+.governance-proposal-card p, .governance-memory-card > p { margin: 0; color: #21443e; font-size: .92rem; line-height: 1.6; overflow-wrap: anywhere; }
+.governance-proposal-card small, .governance-memory-card small { color: #71867e; font-size: .7rem; overflow-wrap: anywhere; }
+.governance-conflict { padding: .55rem .7rem; border: 1px solid #eed6bd; border-radius: .55rem; background: #fff8ec; color: #8b5c25; font-size: .76rem; }
+.governance-memory-list, .governance-event-list { display: flex; flex-direction: column; gap: .7rem; max-height: 55rem; margin: 0; padding: 0; overflow-y: auto; }
+.governance-lineage { display: flex; flex-direction: column; gap: .55rem; padding: .75rem; border-left: 2px solid #81bea7; background: #f5faf5; font-size: .76rem; }
+.governance-lineage > div { border-bottom: 1px solid #e1e9dd; padding-bottom: .4rem; }
+.governance-lineage p { margin: .2rem 0; overflow-wrap: anywhere; }
+.governance-lineage pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.governance-revoke { display: flex; align-items: end; gap: .55rem; padding-top: .65rem; border-top: 1px solid #e6eee4; }
+.governance-revoke label { flex: 1; }
+.governance-event-list { list-style: none; }
+.governance-event-list li { display: flex; flex-direction: column; gap: .35rem; padding: .7rem 0; border-bottom: 1px solid #e7ede5; font-size: .74rem; }
+.governance-event-list li > div { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.governance-event-list strong, .governance-event-list small { overflow-wrap: anywhere; }
+.governance-event-list time, .governance-event-list small { color: #7b9086; }
+.governance-event-list p { margin: 0; color: #3f6459; }
+.governance-empty { margin: .5rem 0; color: #748b80; font-size: .85rem; }
 @media (max-width: 1080px) { .memory-workspace { grid-template-columns: 1fr; } .memory-library-card .memory-list { max-height: none; } }
+@media (max-width: 1080px) { .governance-top-grid, .governance-bottom-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1023px) { .app-sidebar { width: 224px; } .app-main { margin-left: 224px; padding-left: 1.25rem; padding-right: 1.25rem; } .workspace-edition { display: none; } }
 @media (max-width: 767px) {
   .app-sidebar { position: sticky; top: 0; width: 100%; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .5rem .75rem; border-bottom: 0; background: #16363b; box-shadow: 0 8px 22px #14353c1e; }
@@ -169,8 +226,8 @@ body { background: #faf8f3; }
   .new-chat-button { width: auto; min-height: 34px; padding: 0 .7rem; font-size: .75rem; }
   .sidebar-label, .session-heading, .session-list, .runtime-status { display: none; }
   .app-sidebar [data-slot="tabs"] { width: 100%; }
-  .nav-tabs { display: grid !important; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; gap: 0; }
-  .nav-tabs [data-slot="tabs-trigger"] { width: 100%; height: 2.5rem; justify-content: center; gap: .15rem; padding: 0 .1rem; font-size: .67rem; }
+  .nav-tabs { display: grid !important; grid-template-columns: repeat(6, minmax(0, 1fr)); width: 100%; gap: 0; }
+  .nav-tabs [data-slot="tabs-trigger"] { width: 100%; height: 2.5rem; justify-content: center; gap: .15rem; padding: 0 .1rem; font-size: .61rem; }
   .nav-tabs [data-slot="tabs-trigger"] svg { width: .9rem; height: .9rem; }
   .nav-tabs [data-slot="tabs-trigger"][data-active] { box-shadow: inset 0 -2px 0 #75ddbc; }
   .app-main { margin-left: 0; padding: 1rem .75rem 2rem; }
@@ -198,5 +255,10 @@ body { background: #faf8f3; }
   .memory-review-fields { grid-template-columns: 1fr; }
   .memory-job-row { grid-template-columns: 1fr; gap: .45rem; }
   .memory-job-action { justify-self: start; }
+  .governance-header { gap: .75rem; }
+  .governance-inline-form, .governance-revoke { align-items: stretch; flex-direction: column; }
+  .governance-inline-form > button, .governance-revoke > button { align-self: flex-start; }
+  .governance-field-grid { grid-template-columns: 1fr; }
+  .governance-connected { align-items: flex-start; flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { .prompt-grid button { transition: none; } .prompt-grid button:hover { transform: none; } }

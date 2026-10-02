@@ -33,7 +33,10 @@ class RequestGate:
         origin = request.headers.get("origin")
         if request.method not in {"GET", "HEAD"} and origin and origin not in self.allowed_origins:
             return 403, "origin_forbidden", "请求 Origin 不在允许列表", {}
-        if self.api_token:
+        # Shared-memory routes authenticate with a separate, agent-scoped key in
+        # their dependency. The server-wide token never grants an agent identity.
+        agent_scoped = (path == "/api/shared" or path.startswith("/api/shared/")) and bool(request.headers.get("x-agent-key"))
+        if self.api_token and not agent_scoped:
             authorization = request.headers.get("authorization", "")
             supplied = authorization[7:] if authorization.lower().startswith("bearer ") else request.headers.get("x-api-key", "")
             if not supplied or not hmac.compare_digest(supplied, self.api_token):

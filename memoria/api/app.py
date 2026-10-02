@@ -17,12 +17,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..config import Settings
+from ..governance import GovernanceError, MemoryGovernance
 from ..llm import LLMClient
 from ..memory import export_memories_markdown
 from ..observability import MetricRegistry, RequestContext
 from ..security import RequestGate
 from ..service import AgentService
 from ..store import Store
+from .governance import governance_router
 
 MemoryKind = Literal["fact", "preference", "profile", "goal", "procedure"]
 
@@ -239,7 +241,7 @@ class DriftRunBody(StrictModel):
     force: bool = False
 
 
-VERSION = "0.11.0"
+VERSION = "0.12.0"
 TAGS = [
     {"name": "system", "description": "健康检查、运行时能力和脱敏配置。"},
     {"name": "setup", "description": "模型热配置、连通性测试与 Setup 向导。"},
@@ -252,6 +254,8 @@ TAGS = [
     {"name": "drift", "description": "空闲 Drift 调度、手动触发与运行审计。"},
     {"name": "skills", "description": "轻量 SKILL.md 目录发现、读取与热重载。"},
     {"name": "traces", "description": "每轮推理的耗时、召回与工具调用诊断。"},
+    {"name": "governance", "description": "本机治理管理员：Agent 凭证与受审导入。"},
+    {"name": "shared memory", "description": "基于 Agent key 和空间角色授权的共享记忆。"},
 ]
 
 
@@ -278,6 +282,7 @@ class MarkdownWriteBody(StrictModel):
 def create_app(config_path: str | Path | None = None) -> FastAPI:
     settings = Settings.load(config_path)
     store = Store(settings.database, settings.vector_backend)
+    governance = MemoryGovernance(store)
     service = AgentService(settings, store, LLMClient(settings))
     session_locks: dict[str, asyncio.Lock] = {}
     active_turns: dict[str, asyncio.Task] = {}
@@ -304,13 +309,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Memoria Agent API", version=VERSION,
-        summary="带长期记忆、工具循环和可观测 trace 的本地 Agent API",
+        summary="可审核的个人与共享记忆、工具循环和运行追踪 API",
         description="API 默认挂载在 `/api`。交互式文档：`/docs`；OpenAPI JSON：`/openapi.json`。",
         openapi_tags=TAGS, lifespan=lifespan,
         responses={422: {"model": ErrorResponse, "description": "请求校验失败"}},
     )
     app.state.settings, app.state.store, app.state.service, app.state.metrics = settings, store, service, metrics
-    app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-Request-ID", "Authorization", "X-API-Key"])
+    app.state.governance = governance
+    app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-Request-ID", "Authorization", "X-API-Key", "X-Agent-Key"])
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
@@ -341,6 +347,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException):
         return _error(request, exc.status_code, _error_code(exc.status_code), str(exc.detail))
+
+    @app.exception_handler(GovernanceError)
+    async def governance_error(request: Request, exc: GovernanceError):
+        return _error(request, exc.status_code, _error_code(exc.status_code), exc.detail)
 
     @app.get("/api/health", response_model=HealthResponse, tags=["system"], summary="存活检查")
     def health() -> HealthResponse:
@@ -719,6 +729,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         service.runtime.memory.refresh_markdown()
         return Response(status_code=204)
 
+    app.include_router(governance_router(governance, store, settings))
     try:
         _register_round13(app)
     except Exception:
@@ -739,7 +750,7 @@ def _error(request: Request, status: int, code: str, message: str) -> JSONRespon
 
 
 def _error_code(status: int) -> str:
-    return {401: "unauthorized", 403: "forbidden", 404: "not_found", 409: "conflict", 413: "payload_too_large", 429: "rate_limited", 502: "upstream_error"}.get(status, "request_error")
+    return {401: "unauthorized", 403: "forbidden", 404: "not_found", 409: "conflict", 413: "payload_too_large", 422: "validation_error", 429: "rate_limited", 502: "upstream_error"}.get(status, "request_error")
 
 # ---- 第十三轮: Bi-temporal + Agentic Memory 路由(追加,避免改动原有路由) ----
 class EvolveBody(StrictModel):
@@ -756,6 +767,7 @@ def _register_round13(app):
 
     @app.get("/api/memories/{memory_id}", tags=["memories"], summary="记忆详情(含邻居与演化链)")
     def memory_detail(memory_id: str):
+        store = app.state.store
         item = store.memory(memory_id)
         if not item: raise HTTPException(status_code=404, detail="memory not found")
         item["neighbors"] = store.memory_neighbors(memory_id, depth=1, limit=10)
@@ -788,4 +800,3 @@ def _register_round13(app):
     @app.get("/api/memories/{memory_id}/evolutions", tags=["memories"], summary="记忆演化历史")
     def evolutions(memory_id: str):
         return app.state.store.memory_evolutions(memory_id)
-

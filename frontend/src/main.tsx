@@ -1,7 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState}from'react'
 import{createRoot}from'react-dom/client'
 import{ThemeProvider}from'next-themes'
-import{ActivityIcon,BrainIcon,DatabaseIcon,HistoryIcon,ListChecksIcon,MessageSquarePlusIcon,PlayIcon,PlusIcon,RefreshCwIcon,RotateCcwIcon,SearchIcon,SendIcon,Settings2Icon,SquareIcon,Trash2Icon,Undo2Icon,WrenchIcon}from'lucide-react'
+import{ActivityIcon,BrainIcon,DatabaseIcon,HistoryIcon,ListChecksIcon,MessageSquarePlusIcon,PlayIcon,PlusIcon,RefreshCwIcon,RotateCcwIcon,SearchIcon,SendIcon,Settings2Icon,Share2Icon,SquareIcon,Trash2Icon,Undo2Icon,WrenchIcon}from'lucide-react'
 import{api,ApiError,type Memory,type MemoryJob,type MemoryKind,type MemoryReview,type MemoryUndo,type Message as MessageRecord,type Overview,type Session,type SetupStatus,type Trace}from'./api'
 import{Alert,AlertAction,AlertDescription,AlertTitle}from'@/components/ui/alert'
 import{AlertDialog,AlertDialogAction,AlertDialogCancel,AlertDialogContent,AlertDialogDescription,AlertDialogFooter,AlertDialogHeader,AlertDialogMedia,AlertDialogTitle,AlertDialogTrigger}from'@/components/ui/alert-dialog'
@@ -25,8 +25,9 @@ import'./styles.css'
 import'./theme.css'
 import{MemoryInspectDialog}from'./MemoryInspectDialog'
 import{MemoryReviewQueue}from'./MemoryReviewQueue'
+import{SharedGovernancePage}from'./SharedGovernancePage'
 
-type Page='chat'|'memory'|'runtime'|'tools'|'setup'
+type Page='chat'|'memory'|'shared'|'runtime'|'tools'|'setup'
 const memoryKinds:MemoryKind[]=['fact','preference','profile','goal','procedure']
 const date=(value:string)=>new Intl.DateTimeFormat('zh-CN',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(value))
 
@@ -68,16 +69,17 @@ function App(){
   <aside className="app-sidebar">
    <div className="sidebar-top"><div className="brand"><span className="brand-mark"><BrainIcon/></span><span><strong>Memoria</strong><small>PERSONAL AGENT</small></span></div><Button className="new-chat-button" onClick={newSession}><MessageSquarePlusIcon data-icon="inline-start"/>新建对话</Button></div>
    <div className="sidebar-label">工作空间</div>
-   <Tabs value={page} onValueChange={value=>setPage(value as Page)} orientation="vertical"><TabsList className="nav-tabs"><TabsTrigger value="chat"><BrainIcon data-icon="inline-start"/>对话</TabsTrigger><TabsTrigger value="memory"><DatabaseIcon data-icon="inline-start"/>记忆</TabsTrigger><TabsTrigger value="runtime"><ActivityIcon data-icon="inline-start"/>追踪</TabsTrigger><TabsTrigger value="tools"><WrenchIcon data-icon="inline-start"/>工具</TabsTrigger><TabsTrigger value="setup"><Settings2Icon data-icon="inline-start"/>设置</TabsTrigger></TabsList></Tabs>
+   <Tabs value={page} onValueChange={value=>setPage(value as Page)} orientation="vertical"><TabsList className="nav-tabs"><TabsTrigger value="chat"><BrainIcon data-icon="inline-start"/>对话</TabsTrigger><TabsTrigger value="memory"><DatabaseIcon data-icon="inline-start"/>记忆</TabsTrigger><TabsTrigger value="shared"><Share2Icon data-icon="inline-start"/>共享治理</TabsTrigger><TabsTrigger value="runtime"><ActivityIcon data-icon="inline-start"/>追踪</TabsTrigger><TabsTrigger value="tools"><WrenchIcon data-icon="inline-start"/>工具</TabsTrigger><TabsTrigger value="setup"><Settings2Icon data-icon="inline-start"/>设置</TabsTrigger></TabsList></Tabs>
    <div className="session-heading">最近会话 <span>{sessions.length}</span></div><div className="session-list">{sessions.map(s=><button key={s.id} data-active={active===s.id} onClick={()=>{setFocusMessageId('');setActive(s.id);setPage('chat')}}><span className="truncate">{s.title}</span><small>{s.message_count} 条消息</small></button>)}</div>
    <div className="runtime-status" data-online={online}><span className="status-dot"/>{online?'服务已连接':'连接中或不可用'}</div>
   </aside>
   <main className="app-main">
-   <div className="workspace-bar"><span>MEMORIA <span className="workspace-divider">/</span> {({chat:'对话',memory:'记忆',runtime:'追踪',tools:'工具',setup:'设置'} as Record<Page,string>)[page]}</span><span className="workspace-edition">PERSONAL WORKSPACE</span></div>
+   <div className="workspace-bar"><span>MEMORIA <span className="workspace-divider">/</span> {({chat:'对话',memory:'记忆',shared:'共享治理',runtime:'追踪',tools:'工具',setup:'设置'} as Record<Page,string>)[page]}</span><span className="workspace-edition">{page==='shared'?'GOVERNED SHARED MEMORY':'PERSONAL WORKSPACE'}</span></div>
    {error&&<Alert variant="destructive"><AlertTitle>请求失败</AlertTitle><AlertDescription>{error}</AlertDescription><AlertAction><Button variant="ghost" size="sm" onClick={()=>setError('')}>关闭</Button></AlertAction></Alert>}
-   {setup?.setup_needed&&page!=='setup'&&<Alert><AlertTitle>需要完成 Setup</AlertTitle><AlertDescription>主模型尚未完整配置。请先填写模型、Base URL 与 API Key。</AlertDescription><AlertAction><Button size="sm" onClick={()=>setPage('setup')}>打开设置</Button></AlertAction></Alert>}
+   {setup?.setup_needed&&page!=='setup'&&page!=='shared'&&<Alert><AlertTitle>需要完成 Setup</AlertTitle><AlertDescription>主模型尚未完整配置。请先填写模型、Base URL 与 API Key。</AlertDescription><AlertAction><Button size="sm" onClick={()=>setPage('setup')}>打开设置</Button></AlertAction></Alert>}
    {page==='chat'&&<ChatPage active={active} messages={messages} focusMessageId={focusMessageId} text={text} busy={busy} onText={setText} onSend={send} onCancel={cancel} onNew={newSession}/>}
    {page==='memory'&&<MemoryPage items={memories} totalMemories={overview?.memories??memories.length} jobs={jobs} reviews={reviews} query={query} onQuery={setQuery} draft={memoryDraft} onDraft={setMemoryDraft} onAdd={addMemory} onDelete={async id=>{await api.deleteMemory(id);refresh()}} onCorrect={async(id,data)=>{const item=await api.correctMemory(id,data);setMemoryNotice('记忆已纠正，旧版本保留在时间线中');await refresh();return item}} onApproveReview={approveReview} onRejectReview={rejectReview} onSource={jumpToSource} onReindex={reindexMemories} onRetryJob={retryJob} onUndoJob={undoJob} reindexing={reindexing} memoryNotice={memoryNotice} onError={showError}/>}
+   <div hidden={page!=='shared'}><SharedGovernancePage/></div>
    {page==='runtime'&&<RuntimePage overview={overview} traces={traces} onRunDrift={async(force)=>{try{await api.runDrift(force);await refresh()}catch(e){showError(e)}}}/>} 
    {page==='tools'&&<ToolsPage overview={overview} name={toolName} args={toolArgs} result={toolResult} busy={busy} onName={setToolName} onArgs={setToolArgs} onRun={runTool} onReloadMcp={async()=>{try{await api.reloadMcp();await refresh()}catch(e){showError(e)}}}/>}
    {page==='setup'&&<SetupPage setup={setup} onSaved={async()=>{await refresh();setPage('chat')}} onError={showError}/>}

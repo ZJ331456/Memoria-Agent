@@ -67,7 +67,7 @@ test('memory timeline opens on demand and mobile navigation keeps all sections',
  await expect(page.getByTestId('memory-timeline')).toContainText('以前喜欢红茶')
  await expect(page.getByTestId('memory-timeline')).toContainText('现在喜欢乌龙茶')
  await page.setViewportSize({width:390,height:844})
- for(const label of ['对话','记忆','追踪','工具','设置'])await expect(page.getByRole('tab',{name:label})).toBeVisible()
+ for(const label of ['对话','记忆','共享治理','追踪','工具','设置'])await expect(page.getByRole('tab',{name:label})).toBeVisible()
  const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth)
  expect(overflow).toBe(false)
  await page.keyboard.press('Escape')
@@ -142,4 +142,105 @@ test('a failed setup request does not hide conversations',async({page})=>{
  await page.reload()
  await expect(page.getByRole('button',{name:/E2E 会话/})).toBeVisible()
  await expect(page.getByText('请求失败')).toBeVisible()
+})
+
+test('shared governance runs from agent setup through approval and audit without persisting its key',async({page})=>{
+ const stamp='2026-10-01T00:00:00Z'
+ const owner={id:'agent-owner',name:'研发 Agent',enabled:true,created_at:stamp,token:'one-time-agent-key'}
+ let spaces:any[]=[],grants:any[]=[],proposals:any[]=[],memories:any[]=[],events:any[]=[]
+ await page.route('**/api/governance/agents',route=>route.fulfill({contentType:'application/json',body:JSON.stringify(owner)}))
+ await page.route('**/api/shared/**',async route=>{
+  const request=route.request(),url=new URL(request.url()),path=url.pathname,body=request.postDataJSON()
+  const json=(value:unknown,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(value)})
+  expect(request.headers()['x-agent-key']).toBe(owner.token)
+  if(path==='/api/shared/spaces'&&request.method()==='GET')return json(spaces)
+  if(path==='/api/shared/spaces'&&request.method()==='POST'){
+   const space={id:'space-1',name:body.name,visibility:'shared',owner_agent_id:owner.id,access_role:'owner',created_at:stamp}
+   spaces=[space]
+   return json(space)
+  }
+  if(path==='/api/shared/spaces/space-1/grants'&&request.method()==='GET')return json(grants)
+  if(path==='/api/shared/spaces/space-1/grants'&&request.method()==='POST'){
+   const grant={space_id:'space-1',agent_id:body.agent_id,agent_name:'执行 Agent',role:body.role,granted_at:stamp}
+   grants=[grant]
+   return json(grant)
+  }
+  if(path==='/api/shared/proposals'&&request.method()==='GET')return json(proposals)
+  if(path==='/api/shared/proposals'&&request.method()==='POST'){
+   const item={...body,id:'proposal-1',space_id:'space-1',proposer_agent_id:owner.id,source_ref:null,expires_at:null,status:'pending',reviewer_id:null,review_reason:'',applied_memory_id:null,created_at:stamp,decided_at:null,conflict_memory_id:null}
+   proposals=[item]
+   return json(item)
+  }
+  if(path==='/api/shared/proposals/proposal-1/approve'){
+   proposals=[]
+   const memory={id:'shared-memory-1',space_id:'space-1',proposal_id:'proposal-1',proposer_agent_id:owner.id,content:'本周发布候选版本',kind:'fact',importance:3,topic_key:'release',source_type:'manual',source_ref:null,expires_at:null,status:'active',version:1,supersedes_id:null,approved_by:owner.id,approved_at:stamp,revoked_by:null,revoked_at:null}
+   memories=[memory]
+   events=[{seq:1,space_id:'space-1',actor_id:owner.id,action:'activate',proposal_id:'proposal-1',memory_id:memory.id,reason:body.reason,source_type:'manual',source_ref:null,created_at:stamp}]
+   return json({...memory,action:'activate'})
+  }
+  if(path==='/api/shared/memories'&&request.method()==='GET')return json(memories)
+  if(path==='/api/shared/events'&&request.method()==='GET')return json(events)
+  return json({detail:`unmocked ${path}`},404)
+ })
+ await page.getByRole('tab',{name:'共享治理'}).click()
+ await page.getByLabel('Agent 名称').fill(owner.name)
+ await page.getByRole('button',{name:'创建 Agent'}).click()
+ await expect(page.getByText(owner.token,{exact:true})).toBeVisible()
+ await page.getByRole('button',{name:'使用此密钥'}).click()
+ await page.getByLabel('创建空间').fill('产品研发')
+ await page.getByRole('button',{name:'创建',exact:true}).click()
+ await expect(page.locator('.governance-space-meta strong')).toHaveText('产品研发')
+ await page.getByLabel('目标 Agent ID').fill('agent-worker')
+ await page.getByRole('button',{name:'授权',exact:true}).click()
+ await expect(page.locator('.governance-grants')).toContainText('执行 Agent')
+ await page.getByLabel('记忆内容').fill('本周发布候选版本')
+ await page.getByLabel('主题键').fill('release')
+ await page.getByRole('button',{name:'提交审核'}).click()
+ await expect(page.getByText('本周发布候选版本',{exact:true})).toHaveCount(1)
+ await page.getByLabel('审核理由').fill('已核对版本计划')
+ await page.getByRole('button',{name:'批准',exact:true}).click()
+ await expect(page.getByText('本周发布候选版本',{exact:true})).toBeVisible()
+ await expect(page.getByText('已核对版本计划')).toBeVisible()
+ expect(await page.evaluate(()=>Object.values(localStorage).concat(Object.values(sessionStorage)).some(value=>String(value).includes('one-time-agent-key')))).toBe(false)
+})
+
+test('shared governance drops cached data after lost access and ignores a late lineage response',async({page})=>{
+ const stamp='2026-10-01T00:00:00Z',key='revocable-agent-key'
+ const space=(id:string,name:string)=>({id,name,visibility:'shared',owner_agent_id:'owner',access_role:'owner',created_at:stamp})
+ const memory=(spaceId:string,content:string)=>({id:`memory-${spaceId}`,space_id:spaceId,proposal_id:`proposal-${spaceId}`,proposer_agent_id:'owner',content,kind:'fact',importance:3,topic_key:'release',source_type:'manual',source_ref:null,expires_at:null,status:'active',version:1,supersedes_id:null,approved_by:'owner',approved_at:stamp,revoked_by:null,revoked_at:null})
+ const first=memory('space-a','空间 A 的私有计划'),second=memory('space-b','空间 B 的共享结论')
+ let active=true,lateLineage:Route|undefined
+ await page.route('**/api/shared/**',async route=>{
+  const request=route.request(),url=new URL(request.url()),path=url.pathname,spaceId=url.searchParams.get('space_id')||''
+  const json=(value:unknown,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(value)})
+  expect(request.headers()['x-agent-key']).toBe(key)
+  if(path==='/api/shared/spaces')return active?json([space('space-a','空间 A'),space('space-b','空间 B')]):json({detail:'Agent key 无效或已禁用'},401)
+  if(path==='/api/shared/proposals')return json([])
+  if(path==='/api/shared/events')return json([{seq:1,space_id:spaceId,actor_id:'owner',action:'activate',proposal_id:null,memory_id:null,reason:`${spaceId} 的审计`,source_type:null,source_ref:null,created_at:stamp}])
+  if(path.endsWith('/grants'))return json([])
+  if(path==='/api/shared/memories')return json(spaceId==='space-a'?[first]:[second])
+  if(path==='/api/shared/memories/memory-space-a/lineage'){lateLineage=route;return}
+  if(path==='/api/shared/memories/memory-space-b/lineage')return json([second])
+  return json({detail:`unmocked ${path}`},404)
+ })
+ await page.getByRole('tab',{name:'共享治理'}).click()
+ await page.getByLabel('已有 Agent 密钥').fill(key)
+ await page.getByRole('button',{name:'连接'}).click()
+ await expect(page.getByText(first.content,{exact:true})).toBeVisible()
+ await page.getByRole('button',{name:'查看沿革'}).click()
+ await expect.poll(()=>Boolean(lateLineage)).toBe(true)
+ await page.getByLabel('当前空间').selectOption('space-b')
+ await expect(page.getByText(first.content,{exact:true})).toHaveCount(0)
+ await expect(page.getByText(second.content,{exact:true})).toBeVisible()
+ await page.getByRole('button',{name:'查看沿革'}).click()
+ await expect(page.locator('.governance-lineage')).toContainText(second.content)
+ await lateLineage!.fulfill({contentType:'application/json',body:JSON.stringify([{...first,content:'迟到的空间 A 沿革'}])})
+ await expect(page.locator('.governance-lineage')).not.toContainText('迟到的空间 A 沿革')
+ active=false
+ await page.getByRole('button',{name:'刷新空间与权限'}).click()
+ await expect(page.getByText(second.content,{exact:true})).toHaveCount(0)
+ await expect(page.getByText('space-b 的审计')).toHaveCount(0)
+ await expect(page.getByText('Agent key 无效或已禁用')).toBeVisible()
+ await expect(page.getByLabel('已有 Agent 密钥')).toBeVisible()
+ expect(await page.evaluate(()=>Object.values(localStorage).concat(Object.values(sessionStorage)).some(value=>String(value).includes('revocable-agent-key')))).toBe(false)
 })
