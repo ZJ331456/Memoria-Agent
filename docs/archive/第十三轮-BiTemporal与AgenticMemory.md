@@ -1,3 +1,5 @@
+> 历史记录：本文保留当时的审计与实现背景，功能现状和文档入口请以[当前文档导航](../README.md)为准。
+
 # 第十三轮：Bi-temporal 版本治理 + Agentic Memory 主动组织
 
 参考 Graphiti（bi-temporal：valid_at/invalid_at + transaction time，时间旅行查询、矛盾解决）与 A-MEM（Zettelkasten 自组织：attributes、interlinking、continuous evolution）。

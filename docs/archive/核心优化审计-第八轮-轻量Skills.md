@@ -1,3 +1,5 @@
+> 历史记录：本文保留当时的审计与实现背景，功能现状和文档入口请以[当前文档导航](../README.md)为准。
+
 # 核心优化第八轮：轻量 Skills
 
 本轮参考 `project_job/others/akashic-agent/skills` 与 `plugins/standard_tools/skill_catalog.py`，在 Memoria 内落地轻量技能目录，不引入插件热加载、资产归档或 Host Bridge。

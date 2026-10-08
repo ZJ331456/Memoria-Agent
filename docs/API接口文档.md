@@ -1,5 +1,7 @@
 # Memoria Agent API 接口文档
 
+[文档导航](README.md) · [API 实现说明](../memoria/api/README.md)
+
 ## 1. 文档范围
 
 本文描述 Memoria Agent `0.12.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、共享记忆治理、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
@@ -339,7 +341,7 @@ curl -s "$BASE/api/traces?session_id=$SESSION"
 | DELETE | `/api/shared/spaces/{space_id}/grants/{member_id}` | owner 撤销授权。私有空间不能授权。 |
 | POST | `/api/shared/proposals` | 提交 `space_id/content/kind/importance/topic_key/source_type/source_ref/expires_at`；状态始终先为 `pending`。 |
 | GET | `/api/shared/proposals?space_id=...&status=pending` | owner/curator 查看空间队列；contributor 只看自己提案；reader 无权访问。状态还可取 `approved/rejected/all`。 |
-| POST | `/api/shared/proposals/{id}/approve` | owner/curator 发送 `{"reason":"已核对","expected_replaces_id":null}`。同主题已有不同内容时必须填当前有效记忆 ID；旧 ID 返回 409。 |
+| POST | `/api/shared/proposals/{id}/approve` | owner/curator 发送 `{"reason":"已核对","expected_replaces_id":null}`。同主题当前有效版本的内容或类型、来源、有效期等元数据变化时，必须填当前有效记忆 ID；旧 ID 返回 409。 |
 | POST | `/api/shared/proposals/{id}/reject` | owner/curator 发送 `{"reason":"证据不足"}`。 |
 | GET | `/api/shared/memories?space_id=...&q=...&limit=100` | 只返回当前有读权限且已批准、未过期、未撤销的版本；省略 `space_id` 时搜索全部可见空间。 |
 | GET | `/api/shared/memories/{id}` | 按空间 ACL 查询详情。普通成员按 ID 也无法读取已撤销或过期正文。 |
