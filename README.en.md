@@ -8,6 +8,20 @@
 
 Memoria runs locally and stores data in SQLite. Chat and automatic extraction use the OpenAI-compatible endpoint you configure; shared-memory governance can run without a model.
 
+## Core workflow
+
+```mermaid
+flowchart LR
+    A[Agent submits a claim and source] --> B[Pending proposal in a space]
+    B --> C[Owner / Curator review]
+    C --> D[Active shared memory]
+    D --> E[Retrieval by authorized agents]
+    D --> F[Correction / Expiration / Revocation]
+    F --> G[Version lineage and audit events]
+```
+
+The shared layer checks space permissions before search and lookup by a known ID. Changes to an existing topic must confirm its current version to prevent concurrent reviews from overwriting it. Personal chat memories use a separate review queue; administrators can explicitly import active personal memories as shared proposals.
+
 ## What you can do
 
 - **Govern shared memory:** Give agents separate keys and private or shared spaces. Reader, contributor, and curator roles control access. Every shared claim requires review before recall.
@@ -33,11 +47,20 @@ npm run build --prefix frontend
 
 Open <http://127.0.0.1:2237>. On first launch, the Setup page asks for the main model's **Model, Base URL, and API Key**, and lets you test the connection. Fast and embedding models can be configured later. Without an embedding model, lexical memory retrieval still works.
 
-To try shared-memory governance first, open the **共享记忆治理** (Shared memory governance) page. Create an agent, save its one-time key, create a space, grant another agent access, then submit and review a proposal. This flow does not require a model. The page keeps an agent key in memory only; paste it again after a refresh.
+To try shared-memory governance first, open **共享治理** (Shared governance). This flow does not require a model. The page keeps an agent key in memory only; paste it again after a refresh.
 
 Model settings are saved in the Git-ignored `data/models.override.toml`; the API never echoes keys. You can also copy `config.example.toml` to `config.toml` and use environment variables for model and runtime settings.
 
-## Your first memory
+## First use
+
+### Shared memory collaboration
+
+1. Create an agent under Shared governance and save its key, which is shown only once. Connect as that agent and create a space; its creator becomes the owner.
+2. Create another agent and grant its ID the reader, contributor, or curator role. Readers retrieve, contributors submit, curators review, and owners manage membership.
+3. Submit content, a stable `topic_key`, and a source. An owner or curator approves or rejects it with a reason; changes to an existing topic must confirm the version being replaced.
+4. Retrieve approved content using another identity and inspect its lineage; owners and curators can inspect audit events after revocation. A private space is available only to its owner.
+
+### Personal memory workspace
 
 1. Tell Memoria a real preference or goal on the Chat page and finish a conversation.
 2. Open Memory → **待审核候选** (Pending review). Use **查看原始对话** (View original conversation) to check context, then edit and approve the candidate or reject it.
@@ -60,6 +83,20 @@ To change runtime options, first run `cp config.example.toml config.toml`; resta
 
 Runtime data lives in `data/` by default, and the server listens on `127.0.0.1:2237`. Restart the server after upgrading dependencies.
 
+## Repository guide
+
+Each directory README describes its files, call paths, configuration, and checks:
+
+| Directory | Contents |
+| --- | --- |
+| [memoria](memoria/README.md) | Python services, shared governance, and the personal agent runtime; module guides cover lifecycle, prompting, memory, tools, MCP, and more |
+| [frontend](frontend/README.md) | React workspace, pages and APIs, UI components, drafts, and identity cache behavior |
+| [eval](eval/README.md) | Retrieval and governance evaluation, independent scoring, capacity and latency benchmarks |
+| [skills](skills/README.md) | Usage and triggers for five built-in skills, plus the SKILL.md format |
+| [tests](tests/README.md) | Regression tests grouped by capability, optional dependencies, and coverage boundaries |
+
+Module guides are currently written in Chinese; this project overview is available in both languages.
+
 ## Development and checks
 
 ```bash
@@ -71,7 +108,7 @@ npm run build --prefix frontend
 npm run test:e2e --prefix frontend
 ```
 
-For frontend development, run `npm run dev --prefix frontend` in another terminal. Vite proxies `/api` to the local backend.
+Run these commands from the repository root. For frontend development, run `npm run dev --prefix frontend` in another terminal. Vite proxies `/api` to `http://127.0.0.1:2237`. Directory READMEs provide focused checks for individual modules.
 
 ## Evaluation
 
@@ -82,7 +119,7 @@ The repository includes 24 governance regression cases that need no model, plus 
 .venv/bin/python -m eval.benchmark_shared_memory --memories 1000 --spaces 10 --queries 200
 ```
 
-The governance evaluation reports authorized recall, isolation leakage, lifecycle correctness, conflict review, and source matching separately. The local sample passed 24/24 cases with zero leakage. These small synthetic cases do not establish generalization, and storage latency excludes HTTP and model calls.
+The governance evaluation reports authorized recall, isolation leakage, lifecycle correctness, conflict review, and source matching separately. The [archived sample](eval/results/README.md) from 2026-10-02 passed 24/24 cases with zero leakage. These small synthetic cases do not establish generalization, and storage latency excludes HTTP and model calls.
 
 For public data, start with [GateMem](https://github.com/rzhub/GateMem) for authorization and forgetting in shared memory. Use a fixed small subset of [LongMemEval](https://github.com/xiaowu0162/LongMemEval) for knowledge updates and abstention, or [LoCoMo](https://github.com/snap-research/locomo) evidence IDs for source recall across sessions. This repository has not published official scores on these public benchmarks.
 
