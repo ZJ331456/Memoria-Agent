@@ -1,10 +1,23 @@
-# Prompting 与上下文预算
+# Prompting：上下文帧与字符预算
 
-`PromptAssembler` 把身份 system prompt 与长期记忆/会话摘要/中断说明分开：后者进入 system-context-frame，避免模型把候选上下文当成用户原话。
+[返回核心包](../README.md) · [运行时](../runtime/README.md) · [个人记忆](../memory/README.md)
 
-`ContextBudget` 防止会话历史和工具结果无限扩张。它采用确定性的字符预算，不依赖特定 tokenizer，因此可同时服务 DeepSeek、Qwen 和其他 OpenAI-compatible 模型。
+## 文件与流程
 
-处理顺序：先截断超长工具结果；始终保留第一条 system；从最新消息向前选择；最后删除缺少对应 assistant tool call 的孤立 tool message。模型明确返回上下文超长时，Runtime 使用 45% 紧急预算重试一次。
+| 文件 | 职责 |
+|---|---|
+| [assembler.py](assembler.py) | `PromptSection`、`PromptAssembler` 和带标记的 system-context-frame |
+| [budget.py](budget.py) | `ContextBudget`，截短工具结果、保留近期消息并修复 tool call/result 配对 |
+| [__init__.py](__init__.py) | 导出上述接口 |
 
-结果对象记录裁剪前后字符数、丢弃消息数和截断工具结果数，并写入 `TurnContext.metadata.context_budget`，便于 trace 和测试诊断。字符预算通过 `[agent.context].char_budget` 配置，默认 60000。
+[AgentRuntime](../runtime/agent.py) 先检索个人记忆并取得会话摘要，再调用 `PromptAssembler.assemble`。身份指令保留在首条 system message；记忆、摘要、SELF 文本、Skills 和工具目录等候选上下文按 section 顺序组成单独的低信任用户消息。帧内明确要求模型区分用户原话与系统提供的材料。随后追加最近会话历史。
 
+每次模型调用前，`ContextBudget.apply` 以字符数裁剪消息：先截短超长工具结果，再优先保留首条 system 与最近消息，最后清理不完整的 assistant/tool 调用链。遇到模型明确报告上下文过长时，运行时以原预算的 45% 再试一次。裁剪计数进入 turn trace 的 `context_budget` metadata。
+
+`[agent.context].char_budget` 在 [config.example.toml](../../config.example.toml) 中默认 60000；`memory_window` 控制读取的最近会话消息数。预算是字符近似，不是模型 tokenizer 的精确 token 计数；低信任上下文帧属于可被裁剪的消息。
+
+## 从仓库根目录验证
+
+```bash
+python -m pytest -q tests/test_round7_akashic.py::test_prompt_assembler_builds_system_context_frame tests/test_core.py::test_context_budget_keeps_recent_and_valid_tool_protocol
+```

@@ -1,24 +1,29 @@
-# Lifecycle 生命周期流水线
+# Lifecycle：对话扩展阶段
 
-## 目标
+[返回核心包](../README.md) · [运行时](../runtime/README.md) · [可观测性](../observability/README.md)
 
-生命周期让核心逻辑可以扩展而不修改 `AgentRuntime.run()`。设计参考 akashic-agent 的 PhaseModule，但当前采用更小的优先级注册模型，适合单机核心 MVP。
+## 文件与接口
 
-## 五个阶段
+| 文件 | 职责 |
+|---|---|
+| [pipeline.py](pipeline.py) | `Phase`、`TurnContext`、`Pipeline.register/run/inspect` |
+| [__init__.py](__init__.py) | 对外导出上述接口 |
+| [../runtime/agent.py](../runtime/agent.py) | 在一轮对话中依次触发各阶段 |
 
-| Phase | 时机 | 典型用途 |
-|---|---|---|
-| `before_turn` | 消息写入前 | 输入规范化、安全过滤、指令识别 |
-| `before_reasoning` | Prompt 完成后 | 增加上下文块、控制可见工具 |
-| `after_step` | 每轮工具执行后 | 工具审计、结果裁剪、循环保护 |
-| `after_reasoning` | 得到最终回答后 | 输出清洗、引用处理 |
-| `after_turn` | 持久化收尾阶段 | 指标、后台任务投递 |
+`TurnContext` 保存本轮 `session_id`、用户输入、模型消息、召回记忆、工具调用链、回复和 metadata。`Pipeline.register(phase, handler, priority=100)` 注册异步处理器；数字小的先执行，同优先级保持注册顺序。`inspect()` 返回已注册处理器名称，供 `/api/overview` 展示。默认流水线没有预注册处理器，扩展方需要自行注册。
 
-`TurnContext` 是阶段间唯一共享对象，包含 session、用户输入、模型消息、召回记忆、工具链、最终回答和 metadata。
+| 阶段 | 实际调用位置 |
+|---|---|
+| `before_turn` | 保存用户消息之前 |
+| `before_reasoning` | 检索、组装 prompt 之后，首次模型调用之前 |
+| `after_step` | 每批工具结果写回模型消息之后 |
+| `after_reasoning` | 最终回复形成之后、保存助手消息之前 |
+| `after_turn` | 保存助手消息并投递自动记忆任务之后、生成完成 trace 之前 |
 
-## 注册与顺序
+处理器异常会传播到 [AgentRuntime](../runtime/README.md)，并产生 failed trace；该流水线不为处理器提供自动回滚。`Pipeline` 本身没有 TOML 开关，扩展行为由调用方注册决定。
 
-`Pipeline.register(phase, handler, priority)` 注册异步 handler。数字越小越早执行，相同数字维持注册顺序。`inspect()` 会返回当前模块表供 Dashboard 检查。
+## 从仓库根目录验证
 
-处理器应短小、可重入，不应静默吞异常。需要数据库事务的处理器应在自身内部完成提交或回滚。
-
+```bash
+python -m pytest -q tests/test_core.py::test_lifecycle_priority
+```

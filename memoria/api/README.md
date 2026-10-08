@@ -1,74 +1,40 @@
-# Memoria API 包与单文件实现说明
+# API：HTTP 与治理边界
 
-## 1. 文件位置与目标
+[返回核心包](../README.md) · [个人运行时](../runtime/README.md) · [共享治理](../../docs/记忆治理与多Agent共享记忆.md) · [完整接口](../../docs/API接口文档.md)
 
-HTTP API 的全部实现集中在 [`app.py`](app.py)，包入口 [`__init__.py`](__init__.py) 只负责稳定导出 `create_app`。原来的根级 `api.py` 和 `api_models.py` 不再保留，今后新增或修改接口时只需要检查一个实现文件，同时仍通过清晰的代码分区保留可维护性。
+## 文件映射
 
-`app.py` 只负责 HTTP 边界，不实现 Agent 推理、记忆算法或 SQLite 业务逻辑。核心调用方向保持为：
+| 文件 | 职责 |
+|---|---|
+| [app.py](app.py) | `create_app`、Pydantic 契约、中间件、系统/会话/聊天/个人记忆/工具/Drift/MCP/Skills 路由、静态前端托管 |
+| [governance.py](governance.py) | Agent 注册与密钥管理、空间授权、共享记忆提议/审批/检索/撤回及审计路由 |
+| [__init__.py](__init__.py) | 稳定导出 `create_app` |
+| [../security.py](../security.py) | 请求体上限、Origin、可选服务 Token 和限流 |
 
-```text
-FastAPI route
-  → AgentService / AgentRuntime / MemoryEngine
-  → Store / LLMClient / ToolRegistry
+## 请求流程
+
+1. `create_app` 加载 [Settings](../config.py)，构建 [Store](../store.py)、[AgentService](../service.py) 和 [MemoryGovernance](../governance.py)，将治理 router 挂入应用。
+2. 中间件分配 `X-Request-ID`、执行 `RequestGate` 并记录 HTTP 指标。请求体用 Pydantic 校验；校验错误与显式业务异常返回 `{code, message, request_id}`。
+3. 聊天路由调用 `AgentService.chat_with_trace`；流式路由发送 SSE。每个会话用独立锁限制并发 turn，取消路由停止活动任务。
+4. 个人记忆路由使用 [MemoryEngine](../memory/README.md) 和审核队列；共享路由由 `X-Agent-Key` 认证，再由治理层在每次操作时执行空间 ACL。管理员创建/禁用/轮换 Agent key 及导入旧记忆走 `/api/governance`。
+5. 生命周期启动/停止 MCP、自动记忆 worker 和 Drift worker；存在 `frontend/dist` 时托管构建产物。
+
+## 主要路径与边界
+
+| 路径 | 功能 |
+|---|---|
+| `/api/sessions`、`/api/sessions/{id}/chat/stream` | 会话管理、对话和 SSE |
+| `/api/memories`、`/api/memory-reviews` | 个人记忆与自动提取审核 |
+| `/api/governance/agents`、`/api/governance/spaces/{id}/import-memory/{id}` | 管理员身份与旧记忆导入 |
+| `/api/shared/spaces`、`/api/shared/proposals`、`/api/shared/memories`、`/api/shared/events` | 共享记忆空间、提议、查询和审计 |
+| `/api/tools`、`/api/mcp`、`/api/skills`、`/api/drift`、`/api/traces` | 扩展与诊断 |
+| `/docs`、`/openapi.json`、`/metrics` | 运行时接口文档与可选指标 |
+
+`[server.security]` 定义服务 Token、Origin 白名单、限流和请求体上限。提供 `X-Agent-Key` 的 `/api/shared/*` 请求由 Agent key 独立认证，服务 Token 不等于 Agent 身份；`/api/governance/*` 管理员接口仍需服务 Token，未配置时仅允许本机来源。写工具调试执行另需 `confirm_write=true`，不等于共享空间审批。个人与共享记忆 API 的数据表、权限和召回路径保持分离。
+
+## 从仓库根目录验证
+
+```bash
+python -m pytest -q tests/test_core.py tests/test_memory_review.py tests/test_governance_api.py
+python -m compileall -q memoria
 ```
-
-## 2. 文件内部结构
-
-| 顺序 | 区域 | 职责 |
-|---|---|---|
-| 1 | imports 与 `MemoryKind` | 框架依赖和公开枚举 |
-| 2 | Pydantic models | 请求校验、响应过滤与 OpenAPI schema |
-| 3 | `VERSION` 与 `TAGS` | API 版本和 Swagger 分组 |
-| 4 | `create_app()` | 装配 Settings、Store、LLM 和 AgentService |
-| 5 | middleware / handlers | Request ID、安全 header、统一错误结构 |
-| 6 | routes | system、tools、traces、sessions、agent、memories |
-| 7 | SPA mount | 生产构建存在时托管 React 前端 |
-| 8 | `_error*` | 错误响应辅助函数 |
-
-## 3. 请求与响应模型
-
-所有写请求继承 `StrictModel`，其 `extra="forbid"` 会拒绝未知字段。例如把 `importance` 错写为 `important` 会返回 422，不会静默使用默认值。
-
-主要契约包括：
-
-- Session：`SessionBody`、`SessionPatch`、`SessionResponse`
-- Chat：`ChatBody`、`ChatResponse`、`MessageResponse`
-- Memory：另含 `MemoryUndoBody`、`MemoryUndoResponse` 和 `MemoryJobResponse`，支持后台任务与来源撤销。
-- Tool：`ToolExecuteBody`、`ToolExecuteResponse`
-- Trace/System：`TraceResponse`、`HealthResponse`、`ErrorResponse`
-
-响应模型不会包含数据库中的 embedding 原始向量，也不会包含配置文件里的 API Key。
-
-## 4. 路由分组
-
-| Tag | 路径范围 | 说明 |
-|---|---|---|
-| `system` | `/api/health`、`/api/overview` | 存活状态和脱敏运行时信息 |
-| `sessions` | `/api/sessions...` | 会话和消息 CRUD |
-| `agent` | `/api/sessions/{id}/chat`、`chat/stream`、`cancel` | 完整 Agent turn、SSE 与取消 |
-| `memories` | `/api/memories...` | 语义检索、强化/替代写入、编辑、删除、历史和向量回填 |
-| `tools` | `/api/tools...` | 工具目录和受确认保护的调试执行 |
-| `traces` | `/api/traces` | 推理运行追踪 |
-
-详细字段、状态码和 curl 示例见项目级 [`docs/API接口文档.md`](../../docs/API接口文档.md)。服务运行后可访问 `/docs` 查看 Swagger UI，访问 `/openapi.json` 获取机器可读契约。
-
-## 5. 并发与错误边界
-
-- 每个 session 使用独立 `asyncio.Lock`，同一会话的并发 turn 返回 409，不同会话可以并行。
-- active turn 在浏览器断连、显式 cancel 和服务关闭时取消；后台记忆 worker 由 lifespan 同步启停，并使用租约、heartbeat、指数退避支持多进程接管。
-- FastAPI 校验错误转换为统一 `{code, message, request_id}`。
-- Agent 或模型上游异常转换为 502；404 和 409 保留明确业务语义。
-- 所有响应携带 `X-Request-ID`、`X-Process-Time-Ms` 和 `X-Content-Type-Options: nosniff`。
-- CORS 当前只允许本地 Vite 开发地址，适用于可信本机环境。
-- `[server.security]` 可选启用 Bearer Token、Origin 白名单、限流和请求体上限；默认值保持本地开发兼容。
-- `/metrics` 使用 Prometheus 文本协议并在启用 Token 时受相同认证保护。
-
-## 6. 修改 API 的检查清单
-
-1. 在 `app.py` 中新增或修改 Pydantic 模型。
-2. 为路由声明 `response_model`、tag、summary 和输入边界。
-3. 更新 `docs/API接口文档.md` 与前端 `src/api.ts`。
-4. 在 `tests/test_core.py` 增加成功、校验失败和权限边界测试。
-5. 执行 `python -m pytest -q`、`python -m compileall -q memoria` 和前端 `npm run build`。
-
-如果 API 以后增长到数千行，应按业务域拆成 router 包；在当前规模下，用户要求的单文件形式更便于查看和调试。

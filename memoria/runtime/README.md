@@ -1,33 +1,34 @@
-# Runtime 核心运行时
+# Runtime：个人 Agent 对话编排
 
-## 定位
+[返回核心包](../README.md) · [生命周期](../lifecycle/README.md) · [Prompting](../prompting/README.md) · [共享治理](../../docs/记忆治理与多Agent共享记忆.md)
 
-`runtime` 是 Memoria 的用例编排层，对应参考项目里的 AgentCore、CoreRunner 和被动回复 loop。它不直接实现数据库、模型或工具，而是把这些能力按确定顺序组合成一轮完整对话。
+## 文件映射
+
+| 文件 | 职责 |
+|---|---|
+| [agent.py](agent.py) | `AgentRuntime.run`、工具调用循环、流式回调、取消和 trace |
+| [compaction.py](compaction.py) | `SessionCompactor` 对较早消息生成并复用结构化摘要 |
+| [__init__.py](__init__.py) | 导出运行时接口 |
+| [../service.py](../service.py) | 构建运行时依赖，向 API 暴露聊天服务 |
 
 ## 一轮对话
 
-1. 创建 `TurnContext` 和 `TurnTracer`。
-2. 执行 `before_turn` 生命周期。
-3. 保存用户消息并更新首次会话标题。
-4. `MemoryQueryPlanner` 门控、改写 query 并选择类型，再由 `MemoryEngine` 召回相关长期记忆。
-5. 组装系统提示、记忆和最近 `memory_window` 条消息。
-6. 执行 `before_reasoning`。
-7. 调用主模型；如果返回 tool calls，依次校验、执行并把结果追加为 tool message。
-8. 每轮工具执行后运行 `after_step`，直到模型给出最终文本或达到 `max_iterations`。
-9. 执行 `after_reasoning`，保存助手消息并写入持久化后台记忆任务。
-10. 执行 `after_turn`，持久化 trace。
+1. 创建 `TurnContext` 与 `TurnTracer`，触发 `before_turn`，保存用户消息。
+2. 压缩超出 `memory_window` 的历史；[MemoryQueryPlanner](../memory/planner.py) 决定是否召回个人记忆。[MemoryEngine](../memory/engine.py) 的结果和摘要进入 [PromptAssembler](../prompting/assembler.py) 的候选上下文帧。
+3. 注入可用 Skills 和工具目录，追加最近消息，触发 `before_reasoning`。
+4. 每次模型调用前执行 [ContextBudget](../prompting/budget.py)；模型返回工具调用时按 [ToolPolicy](../tools/policy.py) 的本轮授权执行，多个调用可并发。结果以 tool message 回送模型，触发 `after_step`。
+5. 获得最终回复后触发 `after_reasoning`，保存助手消息，投递自动提取任务，再触发 `after_turn` 并持久化 trace。可选回调把模型增量与阶段/工具事件传给 SSE。
 
-## 关键边界
+`SessionCompactor` 为同一批旧消息复用 SQLite 中的摘要；模型不可用时生成规则式回退摘要，原始消息仍在会话历史。模型报告上下文过长时使用 45% 的紧急字符预算重试。工具批次重复第三次由 `ToolLoopGuard` 阻断，并请求模型结束本轮。
 
-- 最大工具迭代被限制在 1–20 之间，配置再大也不会无限循环。
-- 工具失败会作为结构化结果返回模型，不会直接打断整轮。
-- 记忆提取失败不影响用户已经得到的主回复。
-- 任何未处理异常都会写入 failed trace，再交给 API 转换为 502。
-- 每次模型调用前应用字符预算；供应商仍报告上下文超长时使用 45% 紧急预算重试一次。
-- 相同工具调用批次最多执行两次，第三次由 loop guard 阻断并生成阶段性总结。
-- 有事件回调时直接走模型 SSE；取消会贯穿模型、工具和 Runtime，并记录 cancelled trace。
-- 写工具仅在用户表达明确记住/遗忘意图时授权。
+## 配置与边界
 
-## 扩展方式
+`[agent].max_iterations` 控制工具步骤；值为 0 时仍受 **200 步硬上限**，正值也最多 200。`[agent.context]` 控制 `memory_window` 和 `char_budget`。`run(..., turn_kind="drift", skip_memory_enqueue=True)` 供 [Drift](../drift/README.md) 复用，另有有限步数和写工具白名单。
 
-新的推理策略应依赖 `Store`、`LLMClient`、`MemoryEngine`、`ToolRegistry` 接口，不要把 SQL 或 HTTP 写进 runtime。未来可增加并行只读工具，但应保持 `run(session_id, user_text, on_event)` 作为稳定入口。
+异常、取消分别记录 failed/cancelled trace。自动记忆提取发生在后台，批准前不生效。此运行时没有 `agent_id/space_id` 参数；多 Agent 共享记忆由独立 [MemoryGovernance](../governance.py) 和 `/api/shared/*` 提供，当前不会自动注入此对话。
+
+## 从仓库根目录验证
+
+```bash
+python -m pytest -q tests/test_round7_akashic.py tests/test_optimizations.py::test_sse_chat_endpoint_emits_delta_and_complete tests/test_core.py::test_builtin_tools_and_trace
+```

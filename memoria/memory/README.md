@@ -1,76 +1,41 @@
-# Memory 长期记忆引擎
+# Memory：个人长期记忆
 
-## 1. 模块职责
+[返回核心包](../README.md) · [运行时](../runtime/README.md) · [共享治理](../../docs/记忆治理与多Agent共享记忆.md)
 
-`memory` 位于 Runtime 与 SQLite Store 之间，统一负责记忆写入、去重、向量生成、历史数据回填、检索和排序。聊天自动提取先由 worker 存入 SQLite 审核队列；用户批准后才调用 `MemoryEngine` 写入。手动 HTTP API、`recall_memory` 和 `memorize` 工具仍使用该引擎。
+本模块服务**个人对话运行时**。共享 Agent 空间另由 [../governance.py](../governance.py) 管理，尚未接入 `MemoryEngine.retrieve` 或个人 `memorize` 工具。
 
-## 2. 文件说明
+## 文件映射
 
 | 文件 | 职责 |
 |---|---|
-| `embedding.py` | 调用 OpenAI-compatible `/embeddings`，处理分批、超时、重试和响应校验 |
-| `engine.py` | 强化/创建/替代决策、FTS/关键词/余弦召回、RRF 融合与类型限额 |
-| `planner.py` | 召回门控、query rewrite、类型与数量计划 |
-| `worker.py` | 持久化后台抽取、重试、候选审核入队与来源关联 |
-| `__init__.py` | 对外暴露记忆模块的稳定接口 |
-| `../vector_index.py` | 可选 sqlite-vec cosine KNN 索引与 JSON 降级边界 |
-| `../store.py` | 保存正文、JSON 向量、FTS、任务租约、版本和来源，执行 schema 迁移 |
+| [planner.py](planner.py) | `MemoryQueryPlanner` 门控、可选 fast 模型改写查询/类型/数量 |
+| [engine.py](engine.py) | `MemoryEngine` 写入去重、替代、纠正、关键词/BM25/可选向量检索、图扩展和时间查询 |
+| [embedding.py](embedding.py) | OpenAI-compatible `/embeddings` 请求、分批、超时及有限重试 |
+| [worker.py](worker.py) | 会话结束后领取持久任务，提取候选并写入审核队列 |
+| [layer.py](layer.py)、[markdown.py](markdown.py) | `MEMORY.md` 投影、`SELF.md` 和历史 `PENDING.md` 文件 |
+| [../store.py](../store.py)、[../vector_index.py](../vector_index.py) | SQLite、FTS、来源操作账本、可选 sqlite-vec |
 
-## 3. 写入流程
+## 自动提取与人工审核
 
-```text
-候选记忆
-  → 去除首尾空白
-  → 规范文本完全相同：强化已有记忆
-  → 调 embedding 模型
-  → 同类型候选预筛（文本/向量相似度至少 0.55）
-  → fast 模型输出 create / reinforce / supersede
-  → 正文、向量、状态和替代历史原子写入 SQLite
+`AgentRuntime` 保存回复后，以用户消息 ID 为 `source_ref` 投递 `memory_jobs`。`MemoryJobWorker` 使用租约与 heartbeat 领取任务，调用 [LLMClient](../llm.py) 提取候选，存入 `memory_reviews`。**任务完成只表示提取完成，候选尚未生效**；未批准内容不参与检索或 prompt。
+
+用户通过 `GET /api/memory-reviews` 查看候选及原始对话，可编辑正文、类型和重要度后调用 `POST /api/memory-reviews/{id}/approve`，或拒绝。批准才调用 `MemoryEngine.remember`；审核状态在 `pending → applying → approved` 间推进，失败或重启时恢复待审。`GET /api/messages/{id}/source` 与带 `anchor_id` 的会话消息接口定位来源。撤销已批准来源可先用 `POST /api/memories/undo` 的 dry-run 预览。详见[审核与来源定位](../../docs/自动记忆审核与来源定位.md)。
+
+## 写入、检索和版本
+
+手动 API 与个人 `memorize` 工具直接调用 `remember`；规范化正文完全相同的记忆会强化。其他候选按文本/向量相似度交给 fast 模型选择创建、强化或替代；没有决策器时，对部分可变类型有规则式矛盾替代。旧版本与原因保存在替代表；用户纠正产生新版本，可查看时间线。部分写入会生成实体/关键词属性与相关链接；`valid_at/invalid_at` 支持时间查询。个人记忆的 `source_ref` 和操作账本用于来源追踪及撤销。
+
+`retrieve` 从 FTS/关键词种子和当前有效记忆取候选，清理问句尾词后计算词面分、BM25 分和可选向量相似度，按 RRF 融合；再小幅扩展相关记忆图并限制各记忆类型的数量。embedding 不可用时可降级为文本检索；`POST /api/memories/reindex` 可补向量。`MemoryQueryPlanner` 会跳过问候和无关短请求，必要时使用 fast 模型改写查询。检索和个人工具仍只面对个人 `memories` 表。
+
+`MEMORY.md` 从有效结构化记忆重建，不是独立写入源；`SELF.md` 可作为 prompt 上下文。`PENDING.md` 是历史 Markdown 层及 Drift 摘要容器，**自动提取审核队列以 SQLite 为准**。
+
+## 配置与边界
+
+[config.example.toml](../../config.example.toml) 中 `[memory.embedding]` 配置模型；`[memory.retrieval]` 控制 `vector_backend`（`auto/sqlite-vec/json`）与 JSON 扫描上限；`[memory.worker]` 控制租约、重试和退避；`[memory.markdown]` 控制文件投影。`sqlite-vec` 是可选依赖，未启用时使用有限范围的 JSON 向量扫描。离线评测只覆盖小型种子集，不能代表真实长期使用的准确率。
+
+## 从仓库根目录验证
+
+```bash
+python -m pytest -q tests/test_memory_review.py tests/test_memory_retrieval_scale.py tests/test_core.py
+python -m eval.run_seeded --min-recall 0.75
 ```
-
-`reinforce` 只更新已有条目的 `reinforcement`、`last_reinforced_at` 和 `updated_at`。`supersede` 只允许用于 preference、profile、goal、procedure；新条目指向 `supersedes_id`，旧条目标记为 `superseded`，`memory_replacements` 保存新旧正文快照、原因和时间。模型无效输出、目标越界或服务失败时保守选择 `create`，不会自动退休旧信息。
-
-embedding 未配置或暂时失败时，写入仍可执行规范文本强化及关键词候选判断，不会让主对话失败。手动 API 和 Agent 工具返回结构化的 `created/reinforced/superseded` 动作；自动提取只形成 `memory_reviews` 候选。批准后使用来源消息 ID 作为 `source_ref` 调用引擎，操作账本防止重试重复强化。
-
-## 4. 检索流程
-
-Runtime 先由 `MemoryQueryPlanner` 跳过问候和无关短请求，必要时用 fast 模型改写检索词、选择类型和上限。引擎随后执行两条召回通道：
-
-1. 关键词通道对英文单词和中文二元词组打分，同时考虑精确子串、记忆类型和重要度。
-2. 向量通道生成查询向量并计算余弦相似度；动态门槛取 `max(0.45, top_similarity - 0.18)`，过滤“都略微相似”造成的错误注入。
-3. 两条通道使用 Reciprocal Rank Fusion 合并，关键词权重为 0.8，向量权重为 1.0；强化次数形成有上限的小幅加权，同分时重要度更高的记忆优先。
-4. 只有 `active` 记忆参与召回；`superseded` 条目只用于审计，不会注入模型上下文。
-5. 最终按类型设置注入限额，避免单一类型占满 prompt。
-
-引擎内部结果带有 `retrieval.score`、两条通道的排名和向量相似度，用于 trace 与调试；公开 `MemoryResponse` 不暴露向量内容。
-
-## 5. 历史数据与降级
-
-启动旧数据库时，Store 会用 `ALTER TABLE` 自动增加 `embedding`、`status`、`reinforcement`、`supersedes_id` 和 `last_reinforced_at`。检索时最多惰性回填 64 条无向量记忆，写入预筛时最多回填 128 条；也可调用 `POST /api/memories/reindex` 主动批量回填。
-
-以下情况只记录 warning 并回退关键词检索：embedding 未配置、网络超时、供应商 429/5xx、响应数量或维度异常。API Key 只用于请求 header，不写入数据库、trace 或 API 响应。
-
-## 6. 配置
-
-```toml
-[memory.embedding]
-model = "text-embedding-v3"
-api_key = "${DASHSCOPE_API_KEY}"
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-```
-
-`base_url` 应指向兼容 API 的 `/v1` 根路径，客户端会追加 `/embeddings`。安装 `requirements-vector.txt` 后 `auto` 模式使用 sqlite-vec cosine KNN；未安装时回退有限 JSON 扫描。维度改变会使旧向量待重建，避免不兼容向量混排。
-
-## 7. 已知边界
-
-- 向量模型更换且维度变化时，应清空旧向量或提供强制重建；当前只会跳过维度不匹配的旧向量。
-- SQLite worker 已实现数据库租约、续租、过期接管、owner 校验和指数退避；高吞吐跨主机部署仍建议专用任务队列。
-- `eval/` 已提供最小离线评测骨架，仍需用真实匿名数据扩充与校准阈值。
-
-## 8. 后台任务与撤销
-
-主回复完成后以用户消息 ID 作为 `source_ref` 幂等入队。worker 原子领取租约并续租，失败按配置指数退避；达到上限后可通过前端或 retry API 手动恢复。提取结果写入带 `(job_id, ordinal)` 唯一约束的审核队列，重复领取不会覆盖已有审核结果。待审核候选不参与检索、Markdown 投影或模型上下文。
-
-用户可修改候选正文、类型和重要度后批准，或直接拒绝。批准时先将候选标记为 `applying`，调用记忆引擎，再记录 `approved` 和实际写入动作；失败恢复为 `pending`，进程重启时也会回收未完成的 `applying`。`POST /api/memories/undo` 可先 dry-run，再停用已批准来源产生的有效记忆并恢复旧版本。
-
-`source_ref` 对应原始用户消息 ID。`GET /api/messages/{message_id}/source` 定位会话，`GET /api/sessions/{session_id}/messages?anchor_id=...` 读取该消息附近的上下文；原会话被删除后来源链接返回 404。旧版 `PENDING.md` 保留为可读层，新审核队列以 SQLite 为准。
