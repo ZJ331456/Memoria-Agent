@@ -1,4 +1,22 @@
-# 记忆检索评测
+# 记忆检索、治理与性能评测
+
+[项目首页](../README.md) · [后端测试](../tests/README.md) · [个人记忆模块](../memoria/memory/README.md) · [归档报告](results/README.md)
+
+本目录将个人记忆检索、共享记忆治理和存储层性能分别评估。以下命令在仓库根目录运行，要求已安装 `requirements.txt`；需要虚拟环境时将 `python` 替换为 `.venv/bin/python`。默认本地 Runner 使用临时 SQLite，不写入运行中的个人数据库，也不调用模型；`--embedding` 是显式的联网分支。
+
+## 文件导航
+
+| 文件 | 职责 |
+| --- | --- |
+| [memory_eval.py](memory_eval.py) / [memory_cases.json](memory_cases.json) | 对外部提供的个人检索排名独立评分；默认四条小型标签案例 |
+| [run_seeded.py](run_seeded.py) / [seeded_memory_cases.json](seeded_memory_cases.json) | 初始化八条个人记忆，通过查询规划与真实引擎运行十二个中文问题 |
+| [governance_eval.py](governance_eval.py) / [governance_cases.json](governance_cases.json) | 二十四条治理案例的评分器、答案模板与指标门槛 |
+| [run_governance.py](run_governance.py) | 在真实治理层构造案例、生成实际预测并评分 |
+| [benchmark_shared_memory.py](benchmark_shared_memory.py) | 共享存储层的容量、授权检索、详情与越权拒绝测量 |
+| [test_governance_eval.py](test_governance_eval.py) | 评分器与真实 Runner 的回归用例 |
+| [results](results/README.md) | 已记录的实际报告及实验范围，不是模型或公开集数据目录 |
+
+## 个人记忆检索
 
 `memory_cases.json` 是最小基准集，覆盖偏好、目标、替代记忆和无需召回的负样本。预测文件格式为 `{ "case-id": ["memory-id", ...] }`。
 
@@ -15,7 +33,9 @@ python -m eval.run_seeded --min-recall 0.75
 python -m eval.run_seeded --embedding --min-recall 0.85
 ```
 
-第二条会使用本仓库 `config.toml` 的 embedding 模型。线上改动前应固定数据集作回归，并逐步加入匿名真实失败案例。
+第二条通过 `Settings.load()` 使用选定配置的 embedding 模型，可能调用外部服务。配置优先级同主程序，可由 `MEMORIA_CONFIG` 指定；须检查输出和配置，不能仅凭传了 `--embedding` 就断言实际启用了向量召回。线上改动前应固定数据集作回归，并逐步加入匿名真实失败案例。
+
+检索分数的 Recall、Precision、MRR 对有预期记忆的案例求均值；`wrong_injection_rate` 表示无关/负样本被注入记忆的比例，`forbidden_hit_rate` 在声明禁用 ID 的案例中统计前 K 命中。`gating_accuracy` 同时检查正样本命中和负样本为空。`run_seeded` 的输出包含 `report` 与 `predictions`，独立 `memory_eval` 需要的是其中的预测映射，不是整个 Runner 输出文件。
 
 较大记忆库中的词面召回边界由 `tests/test_memory_retrieval_scale.py` 覆盖：220 条高重要性干扰记录下，低重要性的较早记忆仍能通过问题片段被召回。运行 `python -m pytest -q tests/test_memory_retrieval_scale.py`。该场景不调用模型，适合在调整 FTS 查询或候选上限时做确定性回归。
 
@@ -43,6 +63,15 @@ python -m eval.governance_eval /tmp/memoria-governance-actual.json -k 5
 ```
 
 Runner 对每条案例创建独立的临时 `Store`，通过 `MemoryGovernance` 创建 Agent、授权、提议并批准种子记忆，然后调用真实的 `search`、`detail` 和消息来源查询生成预测。已知 ID 案例直接调用 `detail`，验证私有和撤权后的来源隔离。过期案例先批准记忆，再把临时数据库中的有效期设为固定过去时间，以模拟给定的 `as_of`；这是测试时钟替代步骤，不是生产写入流程。Runner 不读取案例的预期答案来生成预测。
+
+也可直接将真实实现作为回归门槛：
+
+```bash
+python -m eval.run_governance --min-pass-rate 1 --max-leak-rate 0
+python -m pytest -q eval/test_governance_eval.py
+```
+
+`--cases` 支持替换案例文件，`-k` 控制前 K 召回；`--predictions-out` 保存供独立评分的系统预测，stdout 是评分报告。门槛未达到时退出码为 1。
 
 来源指标校验后端的记忆、消息和会话三元组，不覆盖浏览器中的跳转交互；此评测也不测吞吐量或延迟。
 
