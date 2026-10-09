@@ -1,6 +1,6 @@
 import json
 
-from eval import run_memory_layers
+from tests.regression import run_memory_layers
 from memoria.memory.episodic import EpisodicMemory
 
 

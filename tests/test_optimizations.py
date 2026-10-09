@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from memoria.api import create_app
 from memoria.config import Settings
-from eval.memory_eval import evaluate_rankings
+from tests.regression.memory_eval import evaluate_rankings
 from memoria.memory import MemoryEngine, MemoryJobWorker, MemoryQueryPlanner
 from memoria.llm import LLMClient
 from memoria.observability import TurnTracer

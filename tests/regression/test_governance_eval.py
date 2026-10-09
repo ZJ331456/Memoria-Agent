@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from eval.governance_eval import evaluate_governance, prediction_template
-from eval.run_governance import run
+from tests.regression.governance_eval import evaluate_governance, prediction_template
+from tests.regression.run_governance import run
 
 
 FIXTURE = json.loads(Path(__file__).with_name("governance_cases.json").read_text(encoding="utf-8"))
