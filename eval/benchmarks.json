@@ -1,0 +1,106 @@
+{
+  "locomo": {
+    "repository": "https://github.com/snap-research/locomo",
+    "revision": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+    "files": [
+      {
+        "path": "data/locomo10.json",
+        "sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4"
+      },
+      {
+        "path": "LICENSE.txt",
+        "sha256": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0"
+      }
+    ],
+    "selection": [
+      {
+        "sample_id": "conv-26",
+        "qa_index": 3
+      },
+      {
+        "sample_id": "conv-26",
+        "qa_index": 0
+      },
+      {
+        "sample_id": "conv-26",
+        "qa_index": 2
+      },
+      {
+        "sample_id": "conv-26",
+        "qa_index": 82
+      },
+      {
+        "sample_id": "conv-26",
+        "qa_index": 152
+      }
+    ]
+  },
+  "gatemem": {
+    "repository": "https://github.com/rzhub/GateMem",
+    "revision": "603f9f4b4ba4b77f043c20f85687fa016fd720b0",
+    "files": [
+      {
+        "path": "DATASET_CARD.md",
+        "sha256": "965e9b6d459cb40c226db5bbaf3ccd4b63fbdb9664f085f522013710d4b73b37"
+      },
+      {
+        "path": "LICENSE",
+        "sha256": "78411c3c6aa9704b32c91fa74d8ba365f32514b0c5897e945a4a6f7e9483facc"
+      },
+      {
+        "path": "bench/data/medical/episodes.jsonl",
+        "sha256": "d4b01f62cbd3457715b5958cf2d07d496c6e59280d28041927e2b3ab8a444b9f"
+      },
+      {
+        "path": "bench/data/medical/checkpoints.jsonl",
+        "sha256": "2447f5905081e6002f16ad14f7f7dc19e14b7181e5ac8ebd08144d68da6437a0"
+      },
+      {
+        "path": "bench/data/office/episodes.jsonl",
+        "sha256": "e15797cc0ab778067e0235377a09811c73182b5e1aa28e2221adc5ef9638a409"
+      },
+      {
+        "path": "bench/data/office/checkpoints.jsonl",
+        "sha256": "7186bc1dd66b493f994b802bad8817d7aa5e7a91f498d67f87410a98f8116d0c"
+      },
+      {
+        "path": "bench/data/education/episodes.jsonl",
+        "sha256": "5971478a96553c2eb18a9f1e079987275da0cddf6175e40abda8a58525e65862"
+      },
+      {
+        "path": "bench/data/education/checkpoints.jsonl",
+        "sha256": "2a372a5017a99108c83324d2fed25dbfb7797a2fb25a20fc066ed5b2d05739b5"
+      },
+      {
+        "path": "bench/data/household/episodes.jsonl",
+        "sha256": "e2bb506cc1bdc8dc7b16d4a57610147365798d03eb1c326f9197b6c6221efb6f"
+      },
+      {
+        "path": "bench/data/household/checkpoints.jsonl",
+        "sha256": "4692c3e1ea91be63debd7b39ccc5fc425bc1a83155c1bfb5c197ba68cefd93ae"
+      }
+    ],
+    "selection": [
+      {
+        "domain": "office",
+        "checkpoint_id": "office_episode_custom_en_001_maple_maplemark_dual_project_ckpt_01"
+      },
+      {
+        "domain": "medical",
+        "checkpoint_id": "med_episode_rewrite_en_001_early_pregnancy_confidential_contact_ckpt_11"
+      },
+      {
+        "domain": "education",
+        "checkpoint_id": "education_episode_custom_en_001_atlas_atlas_scholars_dual_track_ckpt_13"
+      },
+      {
+        "domain": "household",
+        "checkpoint_id": "household_episode_custom_en_001_oak_entry_oak_cleaning_dual_access_ckpt_09"
+      },
+      {
+        "domain": "office",
+        "checkpoint_id": "office_episode_custom_en_001_maple_maplemark_dual_project_ckpt_20"
+      }
+    ]
+  }
+}
