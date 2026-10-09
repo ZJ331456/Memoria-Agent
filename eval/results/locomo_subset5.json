@@ -1,0 +1,790 @@
+{
+  "measurement_date": "2026-10-09",
+  "dataset": {
+    "file": "subset5.json",
+    "sha256": "0a9cc070fe6fcf847a400d978e2fa7a81ae5e39d1416667914c5f05ccc6f03ae",
+    "source": {
+      "repository": "https://github.com/snap-research/locomo",
+      "revision": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+      "files": [
+        {
+          "path": "data/locomo10.json",
+          "sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4"
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0"
+        }
+      ],
+      "selection": [
+        {
+          "sample_id": "conv-26",
+          "qa_index": 3
+        },
+        {
+          "sample_id": "conv-26",
+          "qa_index": 0
+        },
+        {
+          "sample_id": "conv-26",
+          "qa_index": 2
+        },
+        {
+          "sample_id": "conv-26",
+          "qa_index": 82
+        },
+        {
+          "sample_id": "conv-26",
+          "qa_index": 152
+        }
+      ]
+    },
+    "cases": 5
+  },
+  "protocol": {
+    "adapter": "locomo-dialogue-layers-v1",
+    "questions": 5,
+    "top_k_semantic": 10,
+    "top_k_episode": 3,
+    "chunk_chars": 1600,
+    "context_chars": 12000,
+    "max_output_tokens": 4096,
+    "index_all_dialogue_turns": true,
+    "labels_used_only_for_scoring": [
+      "answer",
+      "adversarial_answer",
+      "evidence",
+      "category"
+    ],
+    "limitations": [
+      "five selected QA pairs from one published conversation, not official overall scores",
+      "episodes import dialogue turns; completed means import succeeded, not real task success",
+      "no gold summaries, observations or event summaries are ingested",
+      "image URLs are not fetched; captions retained",
+      "no extraction, approval, skill learning or TTL evaluation; these require other tasks/tests",
+      "semantic-only baseline measures retrieval, not a second LLM answer",
+      "configured custom judge, not official LoCoMo scoring"
+    ]
+  },
+  "models": {
+    "embedding": {
+      "model": "text-embedding-v3",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    },
+    "main": {
+      "model": "deepseek-v4-flash",
+      "base_url": "https://api.deepseek.com/v1"
+    },
+    "fast": {
+      "model": "qwen3.6-flash",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    }
+  },
+  "environment": {
+    "python": "3.11.7",
+    "sqlite": "3.41.2"
+  },
+  "metrics": {
+    "cases": 5,
+    "errors": 0,
+    "semantic": {
+      "completed_eligible": 4,
+      "requested_eligible": 4,
+      "evidence_recall_all_requested": 0.5,
+      "all_found_rate": 0.5
+    },
+    "episode": {
+      "completed_eligible": 4,
+      "requested_eligible": 4,
+      "evidence_recall_all_requested": 0.5,
+      "all_found_rate": 0.5
+    },
+    "combined": {
+      "completed_eligible": 4,
+      "requested_eligible": 4,
+      "evidence_recall_all_requested": 0.5,
+      "all_found_rate": 0.5
+    },
+    "injected": {
+      "completed_eligible": 4,
+      "requested_eligible": 4,
+      "evidence_recall_all_requested": 0.5,
+      "all_found_rate": 0.5
+    },
+    "qa_judged": 5,
+    "qa_correct": 4,
+    "qa_accuracy_all_requested": 0.8,
+    "source_resolution_rate": 1.0
+  },
+  "results": [
+    {
+      "sample_id": "conv-26",
+      "qa_index": 3,
+      "category": 1,
+      "question": "What did Caroline research?",
+      "reference_answer": "Adoption agencies",
+      "adversarial_answer_used_for_scoring": false,
+      "history_turns": 419,
+      "hypothesis": "The conversation does not establish what Caroline researched. Caroline only says she is “off to go do some research” (D1:17), without specifying the topic. In D17:8, Melanie says she will do research after Caroline’s tip, but that also does not state what the research was about.",
+      "judgment": {
+        "correct": false,
+        "reason": "The reference explicitly identifies the research topic as 'Adoption agencies,' but the answer incorrectly claims this information is not established or specified in the conversation."
+      },
+      "index_ms": 27534.889,
+      "indexed_chunks": 419,
+      "embedding_cache_hit": false,
+      "semantic_retrieval_ms": 613.6873189971084,
+      "episode_retrieval_ms": 21.57782700669486,
+      "semantic": {
+        "eligible": true,
+        "expected": 1,
+        "found": 0,
+        "recall": 0.0,
+        "all_found": false,
+        "mrr": 0
+      },
+      "episode": {
+        "eligible": true,
+        "expected": 1,
+        "found": 0,
+        "recall": 0.0,
+        "all_found": false,
+        "mrr": 0
+      },
+      "combined": {
+        "eligible": true,
+        "expected": 1,
+        "found": 0,
+        "recall": 0.0,
+        "all_found": false,
+        "mrr": 0
+      },
+      "injected": {
+        "eligible": true,
+        "expected": 1,
+        "found": 0,
+        "recall": 0.0,
+        "all_found": false,
+        "mrr": 0
+      },
+      "retrieved_source_ids": {
+        "semantic": [
+          "D15:4",
+          "D1:4",
+          "D8:22",
+          "D17:8",
+          "D14:18",
+          "D18:13",
+          "D18:17",
+          "D10:15",
+          "D1:17",
+          "D16:17"
+        ],
+        "episode": [
+          "D18:17",
+          "D17:8",
+          "D15:4"
+        ]
+      },
+      "context": {
+        "semantic_only_chars": 2478,
+        "layered_frame_chars": 3947,
+        "prompt_chars": 4520,
+        "section_stats": [
+          {
+            "name": "Long-term Memory",
+            "original_chars": 2282,
+            "used_chars": 2282,
+            "truncated": false
+          },
+          {
+            "name": "Relevant Episodes",
+            "original_chars": 1423,
+            "used_chars": 1423,
+            "truncated": false
+          }
+        ],
+        "source_caveat": "source occurrence does not prove answer text survived truncation"
+      },
+      "source_resolution": {
+        "retrieved": 10,
+        "resolved": 10
+      },
+      "reader_call": {
+        "usage": {
+          "prompt_tokens": 1334,
+          "completion_tokens": 2427,
+          "total_tokens": 3761,
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1334
+        },
+        "duration_ms": 12002,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "judge_call": {
+        "usage": {
+          "prompt_tokens": 149,
+          "completion_tokens": 1313,
+          "total_tokens": 1462
+        },
+        "duration_ms": 10459,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "embedding_calls": {
+        "logical_batches": 43,
+        "texts": 420,
+        "input_chars": 92429,
+        "failed_batches": 0
+      },
+      "elapsed_ms": 50798.425
+    },
+    {
+      "sample_id": "conv-26",
+      "qa_index": 0,
+      "category": 2,
+      "question": "When did Caroline go to the LGBTQ support group?",
+      "reference_answer": "7 May 2023",
+      "adversarial_answer_used_for_scoring": false,
+      "history_turns": 419,
+      "hypothesis": "Caroline went to the LGBTQ support group on **7 May 2023** — she said on **8 May 2023** that she had gone “yesterday” (D1:3).",
+      "judgment": {
+        "correct": true,
+        "reason": "The answer correctly identifies the date as 7 May 2023, which matches the reference exactly."
+      },
+      "index_ms": 5209.054,
+      "indexed_chunks": 419,
+      "embedding_cache_hit": true,
+      "semantic_retrieval_ms": 886.5870970039396,
+      "episode_retrieval_ms": 18.879449999076314,
+      "semantic": {
+        "eligible": true,
+        "expected": 1,
+        "found": 1,
+        "recall": 1.0,
+        "all_found": true,
+        "mrr": 1.0
+      },
+      "episode": {
+        "eligible": true,
+        "expected": 1,
+        "found": 1,
+        "recall": 1.0,
+        "all_found": true,
+        "mrr": 0.3333333333333333
+      },
+      "combined": {
+        "eligible": true,
+        "expected": 1,
+        "found": 1,
+        "recall": 1.0,
+        "all_found": true,
+        "mrr": 1.0
+      },
+      "injected": {
+        "eligible": true,
+        "expected": 1,
+        "found": 1,
+        "recall": 1.0,
+        "all_found": true,
+        "mrr": 1.0
+      },
+      "retrieved_source_ids": {
+        "semantic": [
+          "D1:3",
+          "D5:2",
+          "D10:3",
+          "D1:7",
+          "D10:5",
+          "D12:1",
+          "D14:34",
+          "D12:2",
+          "D11:6",
+          "D2:12"
+        ],
+        "episode": [
+          "D12:1",
+          "D10:5",
+          "D1:3"
+        ]
+      },
+      "context": {
+        "semantic_only_chars": 3287,
+        "layered_frame_chars": 4944,
+        "prompt_chars": 5538,
+        "section_stats": [
+          {
+            "name": "Long-term Memory",
+            "original_chars": 3091,
+            "used_chars": 3091,
+            "truncated": false
+          },
+          {
+            "name": "Relevant Episodes",
+            "original_chars": 1611,
+            "used_chars": 1611,
+            "truncated": false
+          }
+        ],
+        "source_caveat": "source occurrence does not prove answer text survived truncation"
+      },
+      "source_resolution": {
+        "retrieved": 10,
+        "resolved": 10
+      },
+      "reader_call": {
+        "usage": {
+          "prompt_tokens": 1540,
+          "completion_tokens": 180,
+          "total_tokens": 1720,
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1540
+        },
+        "duration_ms": 1371,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "judge_call": {
+        "usage": {
+          "prompt_tokens": 139,
+          "completion_tokens": 353,
+          "total_tokens": 492
+        },
+        "duration_ms": 2565,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "embedding_calls": {
+        "logical_batches": 1,
+        "texts": 1,
+        "input_chars": 48,
+        "failed_batches": 0
+      },
+      "elapsed_ms": 10141.531
+    },
+    {
+      "sample_id": "conv-26",
+      "qa_index": 2,
+      "category": 3,
+      "question": "What fields would Caroline be likely to pursue in her educaton?",
+      "reference_answer": "Psychology, counseling certification",
+      "adversarial_answer_used_for_scoring": false,
+      "history_turns": 419,
+      "hypothesis": "The only field explicitly tied to Caroline’s education/training is **counseling**: Melanie asks Caroline, “What motivated you to pursue counseling?” (**D4:14**).\n\nHer other stated interests make adjacent fields plausible—such as **social work, psychology, gender/LGBTQ studies, social justice, or child/family services**—because she is described as helping others (**D4:14**), advocating for the trans community and inclusivity (**D3:4, D3:6, D10:4, D14:12**), and giving a home to kids in need (**D2:9, D19:4**). But those specific fields are inferences; the conversation does not explicitly establish them as her education plans.",
+      "judgment": {
+        "correct": true,
+        "reason": "The answer correctly identifies both counseling and psychology as relevant fields, matching the reference. It appropriately distinguishes between explicit statements and reasonable inferences while fully addressing the prompt."
+      },
+      "index_ms": 9197.834,
+      "indexed_chunks": 419,
+      "embedding_cache_hit": true,
+      "semantic_retrieval_ms": 687.0083550020354,
+      "episode_retrieval_ms": 20.318737006164156,
+      "semantic": {
+        "eligible": true,
+        "expected": 2,
+        "found": 0,
+        "recall": 0.0,
+        "all_found": false,
+        "mrr": 0
+      },
+      "episode": {
+        "eligible": true,
+        "expected": 2,
+        "found": 0,
+        "recall": 0.0,
+        "all_found": false,
+        "mrr": 0
+      },
+      "combined": {
+        "eligible": true,
+        "expected": 2,
+        "found": 0,
+        "recall": 0.0,
+        "all_found": false,
+        "mrr": 0
+      },
+      "injected": {
+        "eligible": true,
+        "expected": 2,
+        "found": 0,
+        "recall": 0.0,
+        "all_found": false,
+        "mrr": 0
+      },
+      "retrieved_source_ids": {
+        "semantic": [
+          "D4:14",
+          "D7:8",
+          "D7:4",
+          "D14:24",
+          "D3:10",
+          "D3:6",
+          "D10:4",
+          "D14:12",
+          "D2:9",
+          "D3:4"
+        ],
+        "episode": [
+          "D19:4",
+          "D16:2",
+          "D15:12"
+        ]
+      },
+      "context": {
+        "semantic_only_chars": 3562,
+        "layered_frame_chars": 5353,
+        "prompt_chars": 5962,
+        "section_stats": [
+          {
+            "name": "Long-term Memory",
+            "original_chars": 3366,
+            "used_chars": 3366,
+            "truncated": false
+          },
+          {
+            "name": "Relevant Episodes",
+            "original_chars": 1745,
+            "used_chars": 1745,
+            "truncated": false
+          }
+        ],
+        "source_caveat": "source occurrence does not prove answer text survived truncation"
+      },
+      "source_resolution": {
+        "retrieved": 13,
+        "resolved": 13
+      },
+      "reader_call": {
+        "usage": {
+          "prompt_tokens": 1677,
+          "completion_tokens": 2545,
+          "total_tokens": 4222,
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1677
+        },
+        "duration_ms": 11941,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "judge_call": {
+        "usage": {
+          "prompt_tokens": 253,
+          "completion_tokens": 794,
+          "total_tokens": 1047
+        },
+        "duration_ms": 6378,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "embedding_calls": {
+        "logical_batches": 1,
+        "texts": 1,
+        "input_chars": 63,
+        "failed_batches": 0
+      },
+      "elapsed_ms": 28385.998
+    },
+    {
+      "sample_id": "conv-26",
+      "qa_index": 82,
+      "category": 4,
+      "question": "What did the charity race raise awareness for?",
+      "reference_answer": "mental health",
+      "adversarial_answer_used_for_scoring": false,
+      "history_turns": 419,
+      "hypothesis": "The charity race raised awareness for **mental health** — Melanie ran it (D2:1), and Caroline described it as raising awareness for mental health (D2:2).",
+      "judgment": {
+        "correct": true,
+        "reason": "The answer correctly identifies 'mental health' as the focus, directly matching the reference answer while providing appropriate contextual support."
+      },
+      "index_ms": 3480.624,
+      "indexed_chunks": 419,
+      "embedding_cache_hit": true,
+      "semantic_retrieval_ms": 638.1601589964703,
+      "episode_retrieval_ms": 16.87948199105449,
+      "semantic": {
+        "eligible": true,
+        "expected": 1,
+        "found": 1,
+        "recall": 1.0,
+        "all_found": true,
+        "mrr": 1.0
+      },
+      "episode": {
+        "eligible": true,
+        "expected": 1,
+        "found": 1,
+        "recall": 1.0,
+        "all_found": true,
+        "mrr": 1.0
+      },
+      "combined": {
+        "eligible": true,
+        "expected": 1,
+        "found": 1,
+        "recall": 1.0,
+        "all_found": true,
+        "mrr": 1.0
+      },
+      "injected": {
+        "eligible": true,
+        "expected": 1,
+        "found": 1,
+        "recall": 1.0,
+        "all_found": true,
+        "mrr": 0.5
+      },
+      "retrieved_source_ids": {
+        "semantic": [
+          "D2:2",
+          "D2:1",
+          "D3:2",
+          "D7:1",
+          "D15:4",
+          "D18:17",
+          "D18:6",
+          "D19:12",
+          "D15:13",
+          "D16:17"
+        ],
+        "episode": [
+          "D2:2",
+          "D2:1",
+          "D15:4"
+        ]
+      },
+      "context": {
+        "semantic_only_chars": 3067,
+        "layered_frame_chars": 4546,
+        "prompt_chars": 5138,
+        "section_stats": [
+          {
+            "name": "Long-term Memory",
+            "original_chars": 2871,
+            "used_chars": 2871,
+            "truncated": false
+          },
+          {
+            "name": "Relevant Episodes",
+            "original_chars": 1433,
+            "used_chars": 1433,
+            "truncated": false
+          }
+        ],
+        "source_caveat": "source occurrence does not prove answer text survived truncation"
+      },
+      "source_resolution": {
+        "retrieved": 10,
+        "resolved": 10
+      },
+      "reader_call": {
+        "usage": {
+          "prompt_tokens": 1435,
+          "completion_tokens": 123,
+          "total_tokens": 1558,
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1435
+        },
+        "duration_ms": 1519,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "judge_call": {
+        "usage": {
+          "prompt_tokens": 124,
+          "completion_tokens": 385,
+          "total_tokens": 509
+        },
+        "duration_ms": 3333,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "embedding_calls": {
+        "logical_batches": 1,
+        "texts": 1,
+        "input_chars": 46,
+        "failed_batches": 0
+      },
+      "elapsed_ms": 9099.875
+    },
+    {
+      "sample_id": "conv-26",
+      "qa_index": 152,
+      "category": 5,
+      "question": "What did Caroline realize after her charity race?",
+      "reference_answer": null,
+      "adversarial_answer_used_for_scoring": false,
+      "history_turns": 419,
+      "hypothesis": "The conversation does not establish that **Caroline** ran a charity race or realized anything afterward. It was **Melanie** who said she ran a charity race for mental health (D2:1) and then said the event made her realize that **self-care is really important** (D2:3). Caroline only responded supportively, saying she was proud of Melanie (D2:2).",
+      "judgment": {
+        "correct": true,
+        "reason": "The answer correctly identifies the unsupported premise, clarifies the factual error, and explicitly declines the false assumption as instructed."
+      },
+      "index_ms": 4163.998,
+      "indexed_chunks": 419,
+      "embedding_cache_hit": true,
+      "semantic_retrieval_ms": 782.5109139957931,
+      "episode_retrieval_ms": 16.62386499810964,
+      "semantic": {
+        "eligible": false,
+        "expected": 0,
+        "found": 0,
+        "recall": null,
+        "all_found": null,
+        "mrr": null
+      },
+      "episode": {
+        "eligible": false,
+        "expected": 0,
+        "found": 0,
+        "recall": null,
+        "all_found": null,
+        "mrr": null
+      },
+      "combined": {
+        "eligible": false,
+        "expected": 0,
+        "found": 0,
+        "recall": null,
+        "all_found": null,
+        "mrr": null
+      },
+      "injected": {
+        "eligible": false,
+        "expected": 0,
+        "found": 0,
+        "recall": null,
+        "all_found": null,
+        "mrr": null
+      },
+      "retrieved_source_ids": {
+        "semantic": [
+          "D2:1",
+          "D2:2",
+          "D2:3",
+          "D4:18",
+          "D15:4",
+          "D18:17",
+          "D18:5",
+          "D8:22",
+          "D1:4",
+          "D19:10"
+        ],
+        "episode": [
+          "D18:17",
+          "D2:3",
+          "D2:1"
+        ]
+      },
+      "context": {
+        "semantic_only_chars": 3086,
+        "layered_frame_chars": 4447,
+        "prompt_chars": 5042,
+        "section_stats": [
+          {
+            "name": "Long-term Memory",
+            "original_chars": 2890,
+            "used_chars": 2890,
+            "truncated": false
+          },
+          {
+            "name": "Relevant Episodes",
+            "original_chars": 1315,
+            "used_chars": 1315,
+            "truncated": false
+          }
+        ],
+        "source_caveat": "source occurrence does not prove answer text survived truncation"
+      },
+      "source_resolution": {
+        "retrieved": 10,
+        "resolved": 10
+      },
+      "reader_call": {
+        "usage": {
+          "prompt_tokens": 1461,
+          "completion_tokens": 268,
+          "total_tokens": 1729,
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1461
+        },
+        "duration_ms": 1860,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "judge_call": {
+        "usage": {
+          "prompt_tokens": 177,
+          "completion_tokens": 852,
+          "total_tokens": 1029
+        },
+        "duration_ms": 5591,
+        "retries": 0,
+        "finish_reason": "stop"
+      },
+      "embedding_calls": {
+        "logical_batches": 1,
+        "texts": 1,
+        "input_chars": 49,
+        "failed_batches": 0
+      },
+      "elapsed_ms": 12553.842
+    }
+  ],
+  "local_latency": {
+    "semantic": {
+      "count": 5,
+      "median_ms": 687.008,
+      "min_ms": 613.687,
+      "max_ms": 886.587,
+      "scope": "five sequential queries; includes external query embedding; not an SLO or load test"
+    },
+    "episode": {
+      "count": 5,
+      "median_ms": 18.879,
+      "min_ms": 16.624,
+      "max_ms": 21.578,
+      "scope": "five public checkpoints at most; local calls only, not an SLO or load test"
+    }
+  },
+  "api_totals": {
+    "reader": {
+      "calls": 5,
+      "usage": {
+        "prompt_tokens": 7447,
+        "completion_tokens": 5543,
+        "total_tokens": 12990
+      }
+    },
+    "judge": {
+      "calls": 5,
+      "usage": {
+        "prompt_tokens": 842,
+        "completion_tokens": 3697,
+        "total_tokens": 4539
+      }
+    }
+  },
+  "commands": [
+    "python -m eval.prepare_public --dataset locomo",
+    "python -m eval.run_locomo --embedding --qa --judge"
+  ],
+  "experiment_notes": [
+    "Five fixed original questions; all answers and evidence labels unchanged. Category-5 adversarial_answer is a wrong-answer trap, never used as a reference or reader input.",
+    "Both semantic-only and combined evidence recall were 0.5 on the four eligible questions; no demonstrated episode recall gain. Only layered QA was generated.",
+    "The research-topic question missed D2:8 and was answered incorrectly; the five-case sample is not enough for benchmark-level conclusions.",
+    "Initial offline adapter integration failed due to an incorrect PromptAssembler call; fixed before any QA run. Only the completed API run is quantified here.",
+    "Full-history vectors are cached and reused for questions with the same conversation; no cold-start performance comparison.",
+    "Final source IDs are structural links to imported public dialogue; semantic correctness of inferred memories is not measured."
+  ],
+  "embedding_totals": {
+    "logical_batches": 47,
+    "texts": 424,
+    "input_chars": 92635,
+    "failed_batches": 0
+  },
+  "implementation_commit": "6e323891cbb72a7cb87e365b7c1d405185ce5487",
+  "archive_metadata_note": "Commit reference and aggregate API metadata added while archiving; raw per-case answers and grades were not changed."
+}

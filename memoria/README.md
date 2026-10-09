@@ -36,8 +36,8 @@
 
 ```bash
 python -m pytest -q tests/test_core.py tests/test_governance_core.py tests/test_governance_api.py
-python -m eval.run_seeded
-python -m eval.run_memory_layers --min-pass-rate 1
+python -m tests.regression.run_seeded
+python -m tests.regression.run_memory_layers --min-pass-rate 1
 ```
 
 以上单元测试和种子评测可在不配置在线模型的情况下运行；在线聊天仍需要有效模型配置。

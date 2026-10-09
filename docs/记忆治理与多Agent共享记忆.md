@@ -78,28 +78,17 @@ Agent key 丢失或泄露时，管理员调用 `POST /api/governance/agents/{age
 - 共享检索目前是 SQLite 词面匹配与结果限制，适合小型团队知识库；还没有共享层的向量索引、跨节点并发部署、细粒度字段脱敏或 Agent 间来源证明。
 - 撤销防止共享层再次检索，却不能让已被外部 Agent 复制到其提示词、日志或其他系统的数据消失。它也不清理旧聊天记忆，因为两层尚未合并。
 
-## 评估：先测治理，再测记忆能力
+## 公开评估与工程回归
 
-仓库内 `eval/governance_cases.json` 提供 24 条合成案例，覆盖授权召回、跨空间泄漏、已知 ID 直查、授权撤销、过期、记忆撤销、版本替代、冲突提案、越权写入和来源对应。`python -m eval.run_governance` 用临时 SQLite 运行真实治理层并评分；`python -m eval.governance_eval <predictions.json>` 可评估其他实现的预测。重点指标是 `isolation_leak_rate`、`authorized_recall_at_k`、`lifecycle_accuracy`、`conflict_review_accuracy`、`source_exact_match_rate`。这组案例是回归测试，不是对真实数据或完整 LLM 系统的泛化结论。
-
-本地容量与延迟可独立运行：
+共享治理已接入 [GateMem](https://github.com/rzhub/GateMem) 的 5 个公开检查点，覆盖效用、访问限制和主动遗忘；公开历史中的主体映射为逻辑 Agent，权限状态由 LLM 读取检查点之前的历史编译，再通过真实 `MemoryGovernance` 的提案、授权、审批、撤销、检索和详情 API 执行。
 
 ```bash
-python -m eval.benchmark_shared_memory --memories 1000 --spaces 10 --queries 200
+python -m eval.prepare_public --dataset gatemem
+python -m eval.run_gatemem
 ```
 
-2026-10-02 的本机样例结果：24/24 治理案例通过，隔离泄漏率 0；1000 条记忆分布在 10 个空间，200 次授权检索的 p50/p95 为 **0.070/0.080 ms**，详情 p50/p95 为 **0.026/0.031 ms**，跨空间显式检索与详情分别 200/200 被拒绝。构建种子数据耗时 2935 ms，单独于查询统计。原始报告保存在 `eval/results/`。
+这是独立评测适配器，审批代表基准导入操作，不是人工审核效果；权限编译不属于生产运行时，不证明旧个人聊天已经实现多主体隔离。报告只衡量五个原始检查点，不是官方 MGS 或完整集成绩；具体动作、回答、泄漏判定、来源与共享路径时延见 [公开报告](../eval/results/README.md)。GateMem 本身是上游合成 benchmark，而非现实机构记录。
 
-这些延迟来自单进程 SQLite 存储层、已初始化缓存和每空间约 100 条合成记录，不包含 HTTP、模型、向量检索、并发请求或跨机网络，不能作为线上 SLO。治理单元测试另外覆盖两个独立数据库连接的并发审批、元数据修改、失权提案、旧版本撤销、密钥恢复及来源失效。
+共享 search/detail/source 的计时使用上述公开内容编译后的真实记忆，不再引用原先 1000 条自定义记录的微基准数字。权限、删除、共享读取可用 GateMem 衡量；长期 QA 和来源补充使用 LongMemEval/LoCoMo。[完整覆盖矩阵](./公开数据集评测方案.md)标明未测的工程机制。
 
-本轮验证包括：后端全量回归 **86 passed、1 skipped**（跳过可选 sqlite-vec 测试）；前端 TypeScript/Vite 构建通过；Playwright 浏览器回归 **9 passed**。最后的数据库兼容修复另外增加了两条并发回滚用例：旧记忆引擎创建和替代记忆时，元数据写入必须等待治理事务结束，不能提前提交共享连接上的审批操作。治理事务、旧库元数据写入和向量索引状态读取共用 `Store.lock`。
-
-公开数据集建议按以下顺序接入：
-
-| 数据集 | 合适的用法 | 限制 |
-| --- | --- | --- |
-| [GateMem](https://github.com/rzhub/GateMem) | 最贴近多主体共享记忆治理；官方提供 91 个长篇 episode、2,218 个检查点，区分授权效用、访问越界和主动遗忘。先接一个领域的输入适配器，保留官方评测格式。 | 完整比较包含 LLM 回答/评审成本；本仓库当前尚未跑官方分数。 |
-| [LongMemEval](https://github.com/xiaowu0162/LongMemEval) | 从 500 个问题中固定抽取 20–50 条 `knowledge-update` 和 `abstention` 样例，测更新后是否只召回当前事实，以及证据不足时是否拒答。 | 它主要测长对话记忆能力，不能证明空间 ACL。 |
-| [LoCoMo](https://github.com/snap-research/locomo) | 从 10 个长对话中抽取带 `evidence` 对话 ID 的样例，测来源定位和跨会话召回。 | 不能替代多 Agent 授权评估；使用数据时遵守上游许可证。 |
-
-公开集应固定版本、抽样 ID、模型、提示词和评审方式，并将授权泄漏与有权召回分开报告。下一步应让旧聊天 runtime 通过显式 `agent_id + space_id` 上下文调用共享层，再为该路径运行 GateMem；在完成这一层前，项目只能声称“共享记忆服务具备治理”，不能声称“整个聊天系统具备多主体隔离”。
+旧二十四条治理夹具、独立评分器与合成微基准已移至 [tests/regression](../tests/regression/README.md)，三个旧合成分数报告已删除。工程测试继续覆盖密钥、跨连接并发审批、授权撤销、版本替代、来源失效与事务回滚；这些测试不构成公共任务泛化分数。

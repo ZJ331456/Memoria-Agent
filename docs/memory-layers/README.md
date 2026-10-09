@@ -128,11 +128,11 @@ retrieval_max_chars = 12000
 ```bash
 python -m pytest -q tests/test_episodic_memory.py tests/test_layered_context_budget.py \
   tests/test_incremental_compaction.py tests/test_memory_layers_integration.py
-python -m eval.run_memory_layers --min-pass-rate 1
-python -m eval.run_governance --min-pass-rate 1 --max-leak-rate 0
+python -m tests.regression.run_memory_layers --min-pass-rate 1
+python -m tests.regression.run_governance --min-pass-rate 1 --max-leak-rate 0
 ```
 
-2026-10-09 的[分层机制报告](../../eval/results/memory_layers_regression.json)执行真实本地模块，15/15 通过；强制触发边界的 TTL、容量和字符参数另记在报告中，不是生产默认配置。这只说明已知小样本的机制回归，不能代替真实任务质量或收益测量。
+自定义分层回归已经迁至 [tests/regression](../../tests/regression/README.md)，旧合成分数报告已从 eval 移除。公开评测使用 [LoCoMo 的五题实际历史](../../eval/results/README.md)测量语义、情景、联合及最终注入证据，以及 reader/judge 输出。该样本没有证明情景层提高来源召回；技能、TTL、容量与并发仍由工程测试验证。
 
 下一步调优先固定留出集与模型，比较情景开关、会话窗口 20/40/80 与语义 top-k 4/8/12；保持来源、审核和权限规则一致，每次只改变一个因素。摘要覆盖 ID 表示原文已读入，摘要本身仍有损；当前完整前缀校验与覆盖 JSON 重写的开销随历史长度增长，尚未保证长期大库的常数时间压缩。
 

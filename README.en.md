@@ -104,7 +104,7 @@ Each directory README describes its files, call paths, configuration, and checks
 | --- | --- |
 | [memoria](memoria/README.md) | Python services, shared governance, and the personal agent runtime; module guides cover lifecycle, prompting, memory, tools, MCP, and more |
 | [frontend](frontend/README.md) | React workspace, pages and APIs, UI components, drafts, and identity cache behavior |
-| [eval](eval/README.md) | Retrieval and governance evaluation, independent scoring, capacity and latency benchmarks |
+| [eval](eval/README.md) | Public dataset adapters, fixed five-case pilots, evidence and governance metrics |
 | [skills](skills/README.md) | Usage and triggers for five built-in skills, plus the SKILL.md format |
 | [tests](tests/README.md) | Regression tests grouped by capability, optional dependencies, and coverage boundaries |
 
@@ -115,7 +115,7 @@ Module guides are currently written in Chinese; this project overview is availab
 ```bash
 .venv/bin/python -m pip install pytest
 .venv/bin/python -m pytest -q
-.venv/bin/python -m eval.run_governance
+.venv/bin/python -m tests.regression.run_governance
 npm run build --prefix frontend
 (cd frontend && npx playwright install chromium)
 npm run test:e2e --prefix frontend
@@ -123,32 +123,27 @@ npm run test:e2e --prefix frontend
 
 Run these commands from the repository root. For frontend development, run `npm run dev --prefix frontend` in another terminal. Vite proxies `/api` to `http://127.0.0.1:2237`. Directory READMEs provide focused checks for individual modules.
 
-## Evaluation
+## Public Benchmark Evaluation
 
-The repository includes 24 governance regression cases that need no model, plus a separate local capacity and latency script:
+`eval/` now uses fixed five-case samples from public benchmarks. Locally authored fixtures and mechanism regressions moved to `tests/regression/`; the three synthetic score reports were removed.
 
-```bash
-.venv/bin/python -m eval.run_governance --min-pass-rate 1 --max-leak-rate 0
-.venv/bin/python -m eval.run_memory_layers --min-pass-rate 1
-.venv/bin/python -m eval.benchmark_shared_memory --memories 1000 --spaces 10 --queries 200
-```
-
-The governance evaluation reports authorized recall, isolation leakage, lifecycle correctness, conflict review, and source matching separately. The [archived sample](eval/results/README.md) from 2026-10-02 passed 24/24 cases with zero leakage. These small synthetic cases do not establish generalization, and storage latency excludes HTTP and model calls.
-
-The layered-memory runner exercises real local modules for episode provenance, expiry, pins, pending-review filtering, skill fingerprints, context bounds, and per-turn read limits. It uses no model and does not measure answer quality.
-
-The [LongMemEval](https://github.com/xiaowu0162/LongMemEval) adapter now evaluates public conversation histories with offline retrieval, optional embeddings, an LLM reader, and a separate judge:
+| Dataset | Pilot sample | Main capabilities |
+| --- | --- | --- |
+| LongMemEval | The user's existing five questions | Long histories, facts, preferences, time, and updates |
+| LoCoMo | One original question from each of five categories | Cross-session evidence, speaker attribution, abstention, and semantic/episode injection |
+| GateMem | Five checkpoints across four domains | Shared access, post-deletion answers, provenance, and shared-path timings |
 
 ```bash
-# Defaults to data/benchmark/longmemeval_s_cleaned_subset5.json; no API
+.venv/bin/python -m eval.prepare_public
+.venv/bin/python -m eval.run_locomo --embedding --qa --judge
+.venv/bin/python -m eval.run_gatemem
+# Existing LongMemEval five-case sample; optional --embedding --qa --judge
 .venv/bin/python -m eval.run_longmemeval
-# Uses the configured embedding, main reader, and fast judge models
-.venv/bin/python -m eval.run_longmemeval --embedding --qa --judge
 ```
 
-In the [five-case run](eval/results/longmemeval_subset5.json) on 2026-10-09, lexical/hybrid retrieval reached **90%/100%** annotated-turn recall. Both modes answered the four factual, temporal, and update questions correctly against their reference points. Preference grading is disputed; the report preserves final answers and a suspected judge false positive. This raw-history RAG subset run does not replay human review or shared ACL and is not an official score on all 500 questions. See the [evaluation guide](eval/README.md) for API requirements, caching, and metric definitions.
+Original files stay under `data/benchmark/` with pinned versions, digests, and sample IDs. No complete dataset was evaluated. GateMem is an upstream synthetic public benchmark, not production records. LoCoMo's custom judge accepted 4/5 answers; annotated evidence recall was 50%, with no gain from episode retrieval on these five questions. LongMemEval preference grading remains disputed. GateMem passed 2/2 access and 2/2 deletion checks, but passed 0/1 authorized utility checks because of over-refusal. See the [evaluation guide](eval/README.md) and [reports](eval/results/README.md) for GateMem results, final answers, and adapter limitations.
 
-[GateMem](https://github.com/rzhub/GateMem) remains a candidate for shared authorization and forgetting evaluation; [LoCoMo](https://github.com/snap-research/locomo) evidence IDs can support source recall across sessions.
+These are pilot measurements, not official full-benchmark scores or coverage of every engineering mechanism. TTL, concurrency, skill revisions, and UI workflows remain in `tests/`. GateMem uses the actual shared governance APIs; it does not establish unified multi-principal identity in the legacy chat runtime.
 
 ## Related Projects
 

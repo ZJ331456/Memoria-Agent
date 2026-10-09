@@ -104,7 +104,7 @@ npm run build --prefix frontend
 | --- | --- |
 | [memoria](memoria/README.md) | Python 服务、共享治理与个人 Agent 运行时；继续查看 lifecycle、prompting、memory、tools、MCP 等模块 |
 | [frontend](frontend/README.md) | React 工作台、页面与 API、UI 组件、草稿和身份缓存规则 |
-| [eval](eval/README.md) | 检索与治理评测、独立评分、容量和延迟基准 |
+| [eval](eval/README.md) | 公共数据集接入、固定五题量化、来源与治理指标 |
 | [skills](skills/README.md) | 五个内置技能的使用说明、触发条件及 SKILL.md 编写约定 |
 | [tests](tests/README.md) | 按能力选择回归测试、可选依赖与测试范围 |
 
@@ -113,7 +113,7 @@ npm run build --prefix frontend
 ```bash
 .venv/bin/python -m pip install pytest
 .venv/bin/python -m pytest -q
-.venv/bin/python -m eval.run_governance
+.venv/bin/python -m tests.regression.run_governance
 npm run build --prefix frontend
 (cd frontend && npx playwright install chromium)
 npm run test:e2e --prefix frontend
@@ -121,32 +121,27 @@ npm run test:e2e --prefix frontend
 
 以上命令在仓库根目录运行。前端开发可另开终端运行 `npm run dev --prefix frontend`，Vite 会将 `/api` 代理到 `http://127.0.0.1:2237`。更多针对模块的命令见各目录 README。
 
-## 评测
+## 公开数据集评测
 
-仓库提供 24 条无需模型的治理回归案例，以及独立的本地容量与延迟脚本：
+`eval/` 使用公开 benchmark 的固定五题子集；自定义夹具与机制回归已迁至 `tests/regression/`，原三份合成分数报告已移除。
 
-```bash
-.venv/bin/python -m eval.run_governance --min-pass-rate 1 --max-leak-rate 0
-.venv/bin/python -m eval.run_memory_layers --min-pass-rate 1
-.venv/bin/python -m eval.benchmark_shared_memory --memories 1000 --spaces 10 --queries 200
-```
-
-治理评测分别报告授权召回、隔离泄漏、生命周期、冲突审核和来源对应。2026-10-02 的[归档样例](eval/results/README.md)为 24/24 通过、泄漏率 0；小型合成回归分数不代表真实场景的泛化能力，存储层延迟也不包含 HTTP 或模型调用。
-
-分层评测执行真实本地模块，检查情景来源/过期/固定、待审过滤、技能指纹、上下文和整轮读取预算；不调用模型，不测真实问答质量。
-
-已接入 [LongMemEval](https://github.com/xiaowu0162/LongMemEval) 真实历史数据，支持离线检索、Embedding 混合检索、LLM 问答和独立评分：
+| 数据集 | 本次范围 | 主要能力 |
+| --- | --- | --- |
+| LongMemEval | 用户提供的 5 题 | 长历史事实、偏好、时间与知识更新 |
+| LoCoMo | 原始五类各 1 题 | 多会话来源、人物归属、拒答与语义/情景分层注入 |
+| GateMem | 4 领域共 5 个检查点 | 共享权限、删除后回答、来源和真实共享路径时延 |
 
 ```bash
-# 默认读取 data/benchmark/longmemeval_s_cleaned_subset5.json；无 API
+.venv/bin/python -m eval.prepare_public
+.venv/bin/python -m eval.run_locomo --embedding --qa --judge
+.venv/bin/python -m eval.run_gatemem
+# 已有 LongMemEval 五题：默认离线检索，可加 --embedding --qa --judge
 .venv/bin/python -m eval.run_longmemeval
-# 使用已配置的 Embedding、main 回答模型和 fast 评分模型
-.venv/bin/python -m eval.run_longmemeval --embedding --qa --judge
 ```
 
-2026-10-09 的[5 题实测](eval/results/longmemeval_subset5.json)中，关键词/混合检索的标注轮次召回率为 **90%/100%**；两种方案均回答对 4 道事实、时间与更新题。偏好题的自动判分存在争议，报告保留原始回答与疑似误判说明。这是原始历史 RAG 子集评测，未重放人工审核和共享 ACL，也不是完整 500 题的官方成绩。API 需求、缓存和指标说明见[评测入口](eval/README.md)。
+原始数据位于 `data/benchmark/`，版本、校验和与样本 ID 固定；本次没有运行完整集。GateMem 也是上游合成的公开 benchmark，并非生产记录。LoCoMo 五题自动判分 4/5，标注来源召回 50%；情景层在这五题没有提高来源召回。LongMemEval 的偏好判分存在争议，保留逐题说明。GateMem 访问/遗忘各通过 2/2，但有权效用 0/1，存在过度拒绝。实际报告与适配局限见[评测入口](eval/README.md)和[报告导航](eval/results/README.md)。
 
-共享授权与遗忘可继续接入 [GateMem](https://github.com/rzhub/GateMem)；跨会话来源召回可参考 [LoCoMo](https://github.com/snap-research/locomo) 的证据 ID。
+这些报告不覆盖全部工程机制，也不是官方完整榜单分数。TTL、并发、技能指纹与 UI 交互由 `tests/` 验证。GateMem 调用实际共享治理 API，仍不能证明旧聊天 runtime 已统一多主体身份。
 
 ## Related Projects
 

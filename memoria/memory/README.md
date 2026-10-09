@@ -57,7 +57,7 @@
 
 ## 配置与边界
 
-[config.example.toml](../../config.example.toml) 中 `[memory.embedding]` 配置模型；`[memory.retrieval]` 控制 `vector_backend`（`auto/sqlite-vec/json`）与 JSON 扫描上限；`[memory.worker]` 控制租约、重试和退避；`[memory.markdown]` 控制文件投影。`sqlite-vec` 是可选依赖，未启用时使用有限范围的 JSON 向量扫描。Embedding 客户端默认单批 10 条，兼容当前百炼 text-embedding-v3 的限制。离线评测覆盖小型种子集；另有 [LongMemEval 公开历史适配器](../../docs/LongMemEval评测说明.md)支持可选 API 问答和评分，其 5 题试跑仍不能代表真实长期使用的准确率。
+[config.example.toml](../../config.example.toml) 中 `[memory.embedding]` 配置模型；`[memory.retrieval]` 控制 `vector_backend`（`auto/sqlite-vec/json`）与 JSON 扫描上限；`[memory.worker]` 控制租约、重试和退避；`[memory.markdown]` 控制文件投影。`sqlite-vec` 是可选依赖，未启用时使用有限范围的 JSON 向量扫描。Embedding 客户端默认单批 10 条，兼容当前百炼 text-embedding-v3 的限制。工程回归的小型种子集已移至 `tests/regression/`；[公开评测](../../eval/README.md)采用 LongMemEval、LoCoMo 与 GateMem 的固定五条样本，支持实际问答、分层来源与治理指标，仍不能代表真实长期使用的准确率。
 
 `[memory.layers]` 默认为语义 3000、情景 1800、程序 2400、摘要 2000、目录 1200、SELF 1200 字符，整体帧 12000 字符。每轮 `recall_memory/recall_episodes/search_history/load_skill` 最多 6 次，初始帧和读取返回共享 12000 字符配额；这些都是近似成本控制，不是精确 token。`enabled=false` 关闭新增分层装配与配额，`episodic_enabled=false` 只关闭新情景记录/召回/维护；既有个人事实审核保持可用。
 
@@ -66,6 +66,6 @@
 ```bash
 python -m pytest -q tests/test_memory_review.py tests/test_memory_retrieval_scale.py tests/test_core.py
 python -m pytest -q tests/test_episodic_memory.py tests/test_layered_context_budget.py tests/test_memory_layers_integration.py
-python -m eval.run_seeded --min-recall 0.75
-python -m eval.run_memory_layers --min-pass-rate 1
+python -m tests.regression.run_seeded --min-recall 0.75
+python -m tests.regression.run_memory_layers --min-pass-rate 1
 ```

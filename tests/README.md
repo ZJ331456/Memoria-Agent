@@ -2,7 +2,7 @@
 
 [项目首页](../README.md) · [后端模块](../memoria/README.md) · [评测目录](../eval/README.md) · [浏览器测试](../frontend/e2e/README.md)
 
-本目录验证 Python 存储、个人 Agent 运行时和共享记忆治理。API 测试主要使用 FastAPI TestClient，模型响应使用假实现或 MockTransport；SQLite 测试使用临时目录。浏览器交互测试在 `frontend/e2e/`，独立评测器测试在 `eval/test_governance_eval.py`。
+本目录验证 Python 存储、个人 Agent 运行时和共享记忆治理。API 测试主要使用 FastAPI TestClient，模型响应使用假实现或 MockTransport；SQLite 测试使用临时目录。浏览器交互测试在 `frontend/e2e/`，独立评测器测试在 `tests/regression/test_governance_eval.py`。
 
 ## 安装与运行
 
@@ -14,7 +14,7 @@ python -m pip install pytest
 python -m pytest -q
 ```
 
-根目录运行会发现 `tests/` 和 `eval/` 中的测试。只运行 `python -m pytest -q tests` 不包含独立评测器回归。测试数量会随参数化与新用例变化，以本次 pytest 输出为准。
+全部后端与评分器回归位于 `tests/`，包括 `tests/regression/`；`eval/` 仅保留公共数据集适配与结果。测试数量会随参数化与新用例变化，以本次 pytest 输出为准。
 
 ## 按能力查找
 
@@ -32,6 +32,7 @@ python -m pytest -q
 | [test_review_source_transactions.py](test_review_source_transactions.py) | 来源失效时拒绝创建/替代/强化，跨连接删除竞态与外层事务回滚 |
 | [test_memory_layers_eval.py](test_memory_layers_eval.py) | 离线真实模块评估结果，以及故障注入后 Runner 的失败退出码 |
 | [test_embedding_client.py](test_embedding_client.py) | 供应商十条批量限制、完整覆盖和向量排序 |
+| [test_public_benchmarks.py](test_public_benchmarks.py) | 公开适配器的未来/标签隔离、真实 ACL/审批/撤销、人物与来源、错误分母 |
 | [test_longmemeval.py](test_longmemeval.py) | 标签隔离、逐题数据库隔离、来源指标、向量缓存、失败分母与正式回答校验 |
 | [test_governance_core.py](test_governance_core.py) | Agent 密钥、空间 ACL、冲突比较、生命周期、来源校验、密钥恢复、失权提案及跨连接并发审批 |
 | [test_governance_api.py](test_governance_api.py) | 管理员与 Agent key 认证边界、共享审核/撤销/版本以及旧库导入 |
@@ -41,7 +42,7 @@ python -m pytest -q
 | [test_round9_setup_markdown.py](test_round9_setup_markdown.py) | 模型覆盖配置、Setup API、Markdown 同步和自我档案读写 |
 | [test_round10_tool_search_mcp.py](test_round10_tool_search_mcp.py) | 工具按需暴露、MCP 命名、stdio demo 往返和 API 重载 |
 | [test_round11_drift.py](test_round11_drift.py) | 空闲判断、静默时段、开关、任务记录、同技能续跑和技能存在性 |
-| [评测器回归](../eval/test_governance_eval.py) | 漏报、来源泄漏、错误会话、模板、输入校验与真实治理 Runner |
+| [评测器回归](regression/test_governance_eval.py) | 漏报、来源泄漏、错误会话、模板、输入校验与真实治理 Runner |
 
 `round*` 文件名保留演进历史；当前能力按表中职责定位，无需按轮次顺序执行。
 
@@ -55,7 +56,7 @@ python -m pytest -q tests/test_governance_core.py tests/test_governance_api.py t
 python -m pytest -q tests/test_memory_review.py tests/test_memory_retrieval_scale.py
 
 # 独立评测器
-python -m pytest -q eval/test_governance_eval.py
+python -m pytest -q tests/regression/test_governance_eval.py
 
 # 分层记忆与生命周期
 python -m pytest -q tests/test_episodic_memory.py tests/test_layered_context_budget.py \
@@ -74,3 +75,5 @@ python -m pytest -q tests/test_core.py -k user_correction
 - 不需要真实模型密钥即可运行核心回归；这不等于测过真实供应商兼容性、摘要质量、提取质量或嵌入模型性能。
 - 权限隔离测试针对共享记忆服务，不证明旧聊天运行时已经支持多租户。
 - 不将单元测试耗时视为服务延迟。性能基准与实际系统输出评分分别见 eval README。
+
+自定义夹具、合成存储微基准与机制 Runner 的迁移命令见 [regression 导航](regression/README.md)，它们不产生公开 benchmark 成绩。
