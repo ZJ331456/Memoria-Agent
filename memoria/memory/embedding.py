@@ -18,7 +18,7 @@ class EmbeddingError(RuntimeError):
 class EmbeddingClient:
     """Small OpenAI-compatible embedding client with bounded retries and batches."""
 
-    def __init__(self, config: ModelConfig, timeout_seconds: float = 30, max_retries: int = 2, batch_size: int = 16):
+    def __init__(self, config: ModelConfig, timeout_seconds: float = 30, max_retries: int = 2, batch_size: int = 10):
         self.config = config
         self.timeout_seconds = timeout_seconds
         self.max_retries = max(0, max_retries)
