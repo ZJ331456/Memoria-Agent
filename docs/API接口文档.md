@@ -171,13 +171,21 @@
 
 ### `POST /api/memories/reindex?limit=1000`
 
-为没有向量的历史记忆批量回填 embedding，`limit` 范围 1–5000。响应示例：
+为当前模型命名空间缺失向量或与当前索引维度不符的活动记忆回填 embedding，`limit` 范围 1–5000。旧模型及旧维度向量保留，不会被整体清空。响应示例：
 
 ```json
 {"enabled":true,"indexed":36,"remaining":0}
 ```
 
 embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余数量。
+
+### `GET /api/memories/time-travel?as_of=<ISO>&q=&limit=20`
+
+查询指定时刻有效的个人记忆，`limit` 范围 1–200。`as_of` 支持 ISO 8601，统一转换为 UTC；无时区输入按 UTC 解释，非法时间返回 422。有效区间为 `[valid_at,invalid_at)`，因此替代时刻只返回新版本。无 `q` 时按历史有效状态列出；有 `q` 时在历史候选中执行关键词/BM25/可选向量融合与受时间约束的图扩展，不把完整问句当成必须出现的子串。响应不包含 embedding。
+
+### `GET /api/memories/{memory_id}`
+
+返回正文、状态、属性、邻居和演化记录，另含 `validity_intervals=[{"valid_at":"...","invalid_at":null}]`。来源撤销后恢复可出现多个区间；主记录的 `valid_at/invalid_at` 对应最新区间。不存在返回 404，不返回 embedding。默认检索只读取当前版本，历史有效性由区间表判断。完整语义与升级边界见[一致性与检索审查](记忆一致性与检索审查.md)。
 
 ### `GET /api/memory-jobs?limit=50`
 

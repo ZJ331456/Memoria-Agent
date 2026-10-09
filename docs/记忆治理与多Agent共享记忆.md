@@ -82,6 +82,12 @@ Agent key 丢失或泄露时，管理员调用 `POST /api/governance/agents/{age
 
 共享治理已接入 [GateMem](https://github.com/rzhub/GateMem) 的 5 个公开检查点，覆盖效用、访问限制和主动遗忘；公开历史中的主体映射为逻辑 Agent，权限状态由 LLM 读取检查点之前的历史编译，再通过真实 `MemoryGovernance` 的提案、授权、审批、撤销、检索和详情 API 执行。
 
+## 来源校验与授权检索补强
+
+`message`、`conversation`、`reviewed_conversation` 必须指向真实本地消息；`session` 必须指向真实会话；`legacy_memory` 必须指向当前有效个人记忆。提交与批准时分别在数据库写事务内检查，来源消失后批准返回 409，提案仍可拒绝。`manual` 表示人工输入，外部文档/URI 属于尚需人工核对的引用；存在性校验不等于来源支持了提案内容，当前没有自动 NLI 支持度验证。
+
+共享搜索在 SQL 候选阶段先约束空间 ACL、active 状态和未过期，再进行分词匹配与 BM25 排序；最多 2000 条授权匹配候选，最终返回数量受 `limit` 限制。连续且不超过 8 字符的短语保留精确子串行为，较长或多词查询启用词元扩展。评分统计只来自本次授权候选，不读取其他空间正文。此路径不调用模型，尚不能覆盖完全没有共同词元的语义改写。修复记录与限制见[一致性与检索审查](记忆一致性与检索审查.md)。
+
 ```bash
 python -m eval.prepare_public --dataset gatemem
 python -m eval.run_gatemem

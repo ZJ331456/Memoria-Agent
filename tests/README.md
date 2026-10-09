@@ -24,6 +24,7 @@ python -m pytest -q
 | [test_optimizations.py](test_optimizations.py) | 持久化抽取任务、租约恢复、撤销、FTS、查询门控、工具权限、SSE、API 认证/Origin/请求体限制及可选向量后端 |
 | [test_memory_review.py](test_memory_review.py) | 自动提取先待审、批准后召回、旧消息来源定位和处理中候选重启恢复 |
 | [test_memory_retrieval_scale.py](test_memory_retrieval_scale.py) | 较早低重要度记忆召回、替代版本过滤、问句尾词和无事实线索查询 |
+| [test_memory_consistency.py](test_memory_consistency.py) | 原子版本回滚、撤销多区间、UTC 时间、历史融合、图重排、并发强化、本地来源验证、向量模型/维度迁移与热切换 |
 | [test_episodic_memory.py](test_episodic_memory.py) | 情景来源校验、幂等、相关性、TTL/固定保留、管理归档、维护预览和级联删除 |
 | [test_layered_context_budget.py](test_layered_context_budget.py) | 分区/整帧限额、伪造标题边界、超长用户/系统、工具协议和并发读取配额 |
 | [test_incremental_compaction.py](test_incremental_compaction.py) | 500 条以上历史、partial 续读、真实覆盖、CAS 并发、摘要限额与来源失效清理 |
@@ -31,10 +32,11 @@ python -m pytest -q
 | [test_layer_settings_config.py](test_layer_settings_config.py) | 分层配置继承、严格字段类型和完整技能文件的版本指纹 |
 | [test_review_source_transactions.py](test_review_source_transactions.py) | 来源失效时拒绝创建/替代/强化，跨连接删除竞态与外层事务回滚 |
 | [test_memory_layers_eval.py](test_memory_layers_eval.py) | 离线真实模块评估结果，以及故障注入后 Runner 的失败退出码 |
-| [test_embedding_client.py](test_embedding_client.py) | 供应商十条批量限制、完整覆盖和向量排序 |
+| [test_embedding_client.py](test_embedding_client.py) | 供应商十条批量限制、完整覆盖、向量排序及重复序号/非有限数值/零向量拒绝 |
 | [test_public_benchmarks.py](test_public_benchmarks.py) | 公开适配器的未来/标签隔离、真实 ACL/审批/撤销、人物与来源、错误分母 |
 | [test_longmemeval.py](test_longmemeval.py) | 标签隔离、逐题数据库隔离、来源指标、向量缓存、失败分母与正式回答校验 |
 | [test_governance_core.py](test_governance_core.py) | Agent 密钥、空间 ACL、冲突比较、生命周期、来源校验、密钥恢复、失权提案及跨连接并发审批 |
+| [test_governance_consistency.py](test_governance_consistency.py) | 提交/批准时重验本地来源，授权候选范围内的 BM25 与 Top K |
 | [test_governance_api.py](test_governance_api.py) | 管理员与 Agent key 认证边界、共享审核/撤销/版本以及旧库导入 |
 | [test_store_transactions.py](test_store_transactions.py) | 个人记忆元数据写入不得提前提交共享连接上的治理事务；创建与替代两个分支 |
 | [test_round7_akashic.py](test_round7_akashic.py) | Context Frame、会话压缩、事件上下文、工具并行、中断记录与 Markdown 导出 |

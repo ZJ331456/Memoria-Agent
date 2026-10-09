@@ -15,6 +15,8 @@
 
 记忆库中的「检查并纠正」会打开对话框，显示当前内容、纠正表单和按需读取的版本时间线；候选审核在记忆页的独立视图中。来源 ID 可定位到原始对话。布局、响应式样式和视觉主题分别见 [`src/styles.css`](src/styles.css) 与 [`src/theme.css`](src/theme.css)。更细的目录说明见[源码导航](src/README.md)、[组件说明](src/components/README.md)和[浏览器测试](e2e/README.md)。
 
+详情的 `validity_intervals` 可包含多段生效记录；撤销来源后恢复旧记忆时，纠正窗口展示各段区间，保留中间版本曾生效的历史。该展示与版本时间线分别对应有效时间和内容替代关系。
+
 ## 本地开发
 
 在 `frontend/` 目录执行：

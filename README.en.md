@@ -43,6 +43,8 @@ The shared layer checks space permissions before search and lookup by a known ID
 
 Forgetting applies across layers. A completed turn does not automatically become a fact or a verified skill. Episodes start with a 90-day TTL and top-3 recall; the memory frame is capped at 12,000 characters. Adjust these local starting values under `[memory.layers]`. The [memory module README](memoria/memory/README.md) links the Chinese layer guide and primary-source research. Character limits are not exact token budgets.
 
+Personal memory creation, replacement, correction, and source undo maintain validity intervals in one transaction. Restoring an older memory preserves the intervening version in historical queries. Time-constrained queries use hybrid retrieval, and graph scores accumulate edge weights before reranking. Embeddings are isolated by model namespace and dimension without clearing previous vectors. Shared proposals validate local references at submission and approval; reviewers still need to verify that the source supports the claim.
+
 ## Quick start
 
 You need **Python 3.11+**, **Node.js/npm**, and Git. Chat and automatic extraction also require an OpenAI-compatible model endpoint. These commands target Linux/macOS; on Windows, use WSL.
