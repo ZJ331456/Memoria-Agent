@@ -17,6 +17,8 @@
 
 `ToolRegistry.execute` 检查风险级别和本轮写授权，严格校验 JSON 参数，再执行 pre-hook 与异步 executor；结果统一为文本与耗时，默认输出上限 12000 字。取消异常向上传播，其他执行异常写入失败结果。`ToolPolicy` 只识别个人记忆的显式“记住/遗忘”意图；`memorize` 直接写个人记忆，**不向多 Agent 共享空间写提议**。共享记忆有独立的 Agent key、ACL 和审批流程。
 
+启用情景层时额外注册只读 `recall_episodes`，按任务文本检索活动经历并返回来源 ID。运行时的 `recall_memory/recall_episodes/search_history/load_skill` 共享本轮读取配额（默认 6 次，初始帧和返回内容合计 12000 字符）；Tool Search 包装调用会按解码后的实际工具名计数，超额返回明确拒绝。独立 API 工具调试不属于聊天轮次，仍受单次校验/超时/输出上限约束。
+
 `[agent.tools].http_allowed_hosts` 只检查请求的初始主机；`http_get` 使用 httpx 跟随重定向，因此不要把它视作完整的重定向目标隔离。`calculate` 解析 AST 并只允许基本算术。`load_skill` 返回 `SKILL.md` 正文，不执行技能目录里的脚本。
 
 ## 从仓库根目录验证

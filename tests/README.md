@@ -24,6 +24,13 @@ python -m pytest -q
 | [test_optimizations.py](test_optimizations.py) | 持久化抽取任务、租约恢复、撤销、FTS、查询门控、工具权限、SSE、API 认证/Origin/请求体限制及可选向量后端 |
 | [test_memory_review.py](test_memory_review.py) | 自动提取先待审、批准后召回、旧消息来源定位和处理中候选重启恢复 |
 | [test_memory_retrieval_scale.py](test_memory_retrieval_scale.py) | 较早低重要度记忆召回、替代版本过滤、问句尾词和无事实线索查询 |
+| [test_episodic_memory.py](test_episodic_memory.py) | 情景来源校验、幂等、相关性、TTL/固定保留、管理归档、维护预览和级联删除 |
+| [test_layered_context_budget.py](test_layered_context_budget.py) | 分区/整帧限额、伪造标题边界、超长用户/系统、工具协议和并发读取配额 |
+| [test_incremental_compaction.py](test_incremental_compaction.py) | 500 条以上历史、partial 续读、真实覆盖、CAS 并发、摘要限额与来源失效清理 |
+| [test_memory_layers_integration.py](test_memory_layers_integration.py) | 运行时召回/技能 trace、失败/取消、API 认证/开关、删除活跃会话、来源审批竞态及紧急预算 |
+| [test_layer_settings_config.py](test_layer_settings_config.py) | 分层配置继承、严格字段类型和完整技能文件的版本指纹 |
+| [test_review_source_transactions.py](test_review_source_transactions.py) | 来源失效时拒绝创建/替代/强化，跨连接删除竞态与外层事务回滚 |
+| [test_memory_layers_eval.py](test_memory_layers_eval.py) | 离线真实模块评估结果，以及故障注入后 Runner 的失败退出码 |
 | [test_governance_core.py](test_governance_core.py) | Agent 密钥、空间 ACL、冲突比较、生命周期、来源校验、密钥恢复、失权提案及跨连接并发审批 |
 | [test_governance_api.py](test_governance_api.py) | 管理员与 Agent key 认证边界、共享审核/撤销/版本以及旧库导入 |
 | [test_store_transactions.py](test_store_transactions.py) | 个人记忆元数据写入不得提前提交共享连接上的治理事务；创建与替代两个分支 |
@@ -47,6 +54,11 @@ python -m pytest -q tests/test_memory_review.py tests/test_memory_retrieval_scal
 
 # 独立评测器
 python -m pytest -q eval/test_governance_eval.py
+
+# 分层记忆与生命周期
+python -m pytest -q tests/test_episodic_memory.py tests/test_layered_context_budget.py \
+  tests/test_incremental_compaction.py tests/test_memory_layers_integration.py \
+  tests/test_layer_settings_config.py tests/test_review_source_transactions.py tests/test_memory_layers_eval.py
 
 # 定位慢用例或只选择一个能力
 python -m pytest -q --durations=5

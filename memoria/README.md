@@ -10,7 +10,7 @@
 |---|---|
 | [api/](api/README.md) | FastAPI、SSE、鉴权、个人记忆接口与共享治理接口 |
 | [runtime/](runtime/README.md) | 一轮对话、工具循环、会话压缩与取消 |
-| [memory/](memory/README.md) | 个人长期记忆检索、写入、自动提取与人工审核 |
+| [memory/](memory/README.md) | 个人语义事实、任务情景、分层配置/配额、过期归档与人工审核 |
 | [lifecycle/](lifecycle/README.md) | 对话五阶段异步扩展点 |
 | [prompting/](prompting/README.md) | 上下文帧组装和字符预算 |
 | [tools/](tools/README.md) | 工具注册、校验、执行、授权和按需发现 |
@@ -25,7 +25,7 @@
 |---|---|
 | [config.py](config.py) | 加载 [config.example.toml](../config.example.toml) 与环境变量占位符 |
 | [llm.py](llm.py)、[models_config.py](models_config.py) | OpenAI-compatible 模型调用、模型配置展示与更新 |
-| [service.py](service.py) | 组装个人运行时、worker、Drift、Skills 与 MCP |
+| [service.py](service.py) | 组装个人运行时、抽取与情景维护 worker、Drift、Skills 与 MCP |
 | [store.py](store.py)、[vector_index.py](vector_index.py) | SQLite 数据、FTS、任务租约及可选 sqlite-vec 索引 |
 | [governance.py](governance.py) | 与个人 `memories` 表分离的 Agent 空间、权限和审核记录 |
 | [security.py](security.py) | 可选服务级 Token、Origin、请求大小和速率限制 |
@@ -37,6 +37,7 @@
 ```bash
 python -m pytest -q tests/test_core.py tests/test_governance_core.py tests/test_governance_api.py
 python -m eval.run_seeded
+python -m eval.run_memory_layers --min-pass-rate 1
 ```
 
 以上单元测试和种子评测可在不配置在线模型的情况下运行；在线聊天仍需要有效模型配置。

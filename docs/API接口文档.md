@@ -4,7 +4,7 @@
 
 ## 1. 文档范围
 
-本文描述 Memoria Agent `0.12.0` 本地 HTTP API。API 覆盖系统状态、会话、Agent 对话、长期记忆、共享记忆治理、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
+本文描述 Memoria Agent `0.12.0` 本地 HTTP API（2026-10-09 更新分层记忆接口）。API 覆盖系统状态、会话、Agent 对话、个人分层记忆、共享记忆治理、工具调试、Tool Search、MCP、Drift 和运行追踪，不包含 Telegram、飞书、QQ 等外部通道。
 
 共享记忆的数据流、权限边界和评测方法见 [记忆治理与多 Agent 共享记忆](./记忆治理与多Agent共享记忆.md)。
 
@@ -234,6 +234,33 @@ embedding 没有完整配置时不会报错，返回 `enabled=false` 和剩余�
 ### `DELETE /api/memories/{memory_id}`
 
 永久删除指定记忆，成功返回 204。
+
+## 6.1 分层记忆与个人任务情景
+
+这些接口使用全局 API Token，`X-Agent-Key` 不授予访问权限；未配置 Token 时沿用本地个人 API 模式。分层设计与配置解释见[中文 README](memory-layers/README.md)。当前没有单独的前端情景管理页，可通过本节接口或 `/docs` 管理。
+
+| 方法 | 路径 | 参数与响应 |
+| --- | --- | --- |
+| GET | `/api/memory-layers` | 返回 `config` 的分层预算/开关和 `episodic` 统计；关闭时统计为 `{"enabled":false}` |
+| GET | `/api/episodes?query=&status=active&limit=100` | `status=active/archive/all`、`limit=1..500`；有 query 时仅允许 active 相关性检索，结果还受 `episode_top_k` 限制；archive/all 无 query 时为管理列表，可看过期历史 |
+| GET | `/api/episodes/{id}` | 管理详情，含来源消息与 trace ID，可回放过期/归档；来源已删除时 404 |
+| PATCH | `/api/episodes/{id}` | `{"pin":true}` / `{"pin":false}` 固定或取消固定；或 `{"archive":true,"reason":"不再需要"}` 软归档 |
+| POST | `/api/episodes/maintenance` | `{"dry_run":true}` 默认只预览；`false` 执行 TTL/容量软归档 |
+
+关闭分层或情景模块时，情景列表/详情/操作返回 409。PATCH 只能执行一种动作，拒绝未知字段、数字/字符串布尔值、null、空请求或 `archive=false`，返回 422；归档不能通过 pin 恢复。来源追踪使用 `GET /api/messages/{user_message_id}/source`，再按 `session_id` 与 `anchor_id` 查询会话消息。
+
+情景字段为 `id/session_id/user_message_id/assistant_message_id/task/outcome/result/tool_names/error/trace_id/status/pinned/created_at/expires_at/archived_at/archive_reason`。`outcome=completed/failed/cancelled` 是运行状态，completed 不代表任务成功已验证。管理接口回放不会改变召回状态；聊天和 `recall_episodes` 只返回活动且未过期或固定的相关记录。
+
+维护响应包含 `dry_run/as_of/expired_ids/capacity_ids/candidate_ids/count/archived_count/pinned_protected/active_before/active_after`。dry-run 的 `active_after` 是预测值，`archived_count=0`；真实执行记录归档原因，不删除原始对话、语义事实或共享审计。默认 90 天 TTL、1000 条活动容量，固定记录受保护，固定数量超限时可超过容量。
+
+```bash
+curl -s http://127.0.0.1:2237/api/memory-layers
+curl -s 'http://127.0.0.1:2237/api/episodes?status=all&limit=20'
+curl -s -X POST http://127.0.0.1:2237/api/episodes/maintenance \
+  -H 'Content-Type: application/json' -d '{"dry_run":true}'
+```
+
+启用认证时添加 `Authorization: Bearer <token>`。删除会话会清理来源消息、情景、摘要、抽取任务与审核候选；已批准个人语义记忆及来源操作账本仍保留，需要独立的删除/撤销操作。候选已不存在返回 404，候选存在但来源失效时批准返回 409。
 
 ## 7. Tool API
 

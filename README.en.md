@@ -28,7 +28,20 @@ The shared layer checks space permissions before search and lookup by a known ID
 - **Control versions and lifecycle:** Replacing a conflicting claim requires an explicit current-version ID. Expiration, revocation, and grant changes affect retrieval immediately, while sources and audit events remain available to reviewers.
 - **Review long-term memory:** Extracted facts and preferences enter a review queue first. Open the original message, edit a candidate, then approve or reject it. Pending candidates never enter recall.
 - **Inspect and correct:** Open a focused editor directly from any active memory. Follow its source ID to the original conversation, inspect its history, and save a correction with a reason. Only the active version is recalled.
+- **Use layered memory:** Allocate context by memory type, retrieve task episodes with source links, review facts, identify skill revisions, and archive expired episodes while protecting pinned ones.
 - **Use chat and tools:** Persist sessions, stream replies, recall memory, and run tools through Tool Search or MCP. The Dashboard shows jobs and traces; optional Drift runs selected skills while idle.
+
+## Memory architecture
+
+| Responsibility | Implementation |
+| --- | --- |
+| Working memory | Recent messages and incremental summaries; protect the latest request and bound each context section |
+| Episodic memory | Task execution records across sessions, results, source messages, and trace IDs; relevance-based recall |
+| Semantic memory | Confirmed facts, preferences, and goals with provenance, corrections, and versions |
+| Procedural memory | Load `SKILL.md` on demand and record its content fingerprint |
+| Forgetting and governance | TTL, soft archives, pins, version replacement, shared permissions, and revocation |
+
+Forgetting applies across layers. A completed turn does not automatically become a fact or a verified skill. Episodes start with a 90-day TTL and top-3 recall; the memory frame is capped at 12,000 characters. Adjust these local starting values under `[memory.layers]`. The [memory module README](memoria/memory/README.md) links the Chinese layer guide and primary-source research. Character limits are not exact token budgets.
 
 ## Quick start
 
@@ -116,10 +129,13 @@ The repository includes 24 governance regression cases that need no model, plus 
 
 ```bash
 .venv/bin/python -m eval.run_governance --min-pass-rate 1 --max-leak-rate 0
+.venv/bin/python -m eval.run_memory_layers --min-pass-rate 1
 .venv/bin/python -m eval.benchmark_shared_memory --memories 1000 --spaces 10 --queries 200
 ```
 
 The governance evaluation reports authorized recall, isolation leakage, lifecycle correctness, conflict review, and source matching separately. The [archived sample](eval/results/README.md) from 2026-10-02 passed 24/24 cases with zero leakage. These small synthetic cases do not establish generalization, and storage latency excludes HTTP and model calls.
+
+The layered-memory runner exercises real local modules for episode provenance, expiry, pins, pending-review filtering, skill fingerprints, context bounds, and per-turn read limits. It uses no model and does not measure answer quality.
 
 For public data, start with [GateMem](https://github.com/rzhub/GateMem) for authorization and forgetting in shared memory. Use a fixed small subset of [LongMemEval](https://github.com/xiaowu0162/LongMemEval) for knowledge updates and abstention, or [LoCoMo](https://github.com/snap-research/locomo) evidence IDs for source recall across sessions. This repository has not published official scores on these public benchmarks.
 

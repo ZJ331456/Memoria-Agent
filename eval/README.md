@@ -12,6 +12,7 @@
 | [run_seeded.py](run_seeded.py) / [seeded_memory_cases.json](seeded_memory_cases.json) | 初始化八条个人记忆，通过查询规划与真实引擎运行十二个中文问题 |
 | [governance_eval.py](governance_eval.py) / [governance_cases.json](governance_cases.json) | 二十四条治理案例的评分器、答案模板与指标门槛 |
 | [run_governance.py](run_governance.py) | 在真实治理层构造案例、生成实际预测并评分 |
+| [run_memory_layers.py](run_memory_layers.py) | 离线执行真实情景/语义/技能/预算模块，生成十五项分层机制检查 |
 | [benchmark_shared_memory.py](benchmark_shared_memory.py) | 共享存储层的容量、授权检索、详情与越权拒绝测量 |
 | [test_governance_eval.py](test_governance_eval.py) | 评分器与真实 Runner 的回归用例 |
 | [results](results/README.md) | 已记录的实际报告及实验范围，不是模型或公开集数据目录 |
@@ -38,6 +39,21 @@ python -m eval.run_seeded --embedding --min-recall 0.85
 检索分数的 Recall、Precision、MRR 对有预期记忆的案例求均值；`wrong_injection_rate` 表示无关/负样本被注入记忆的比例，`forbidden_hit_rate` 在声明禁用 ID 的案例中统计前 K 命中。`gating_accuracy` 同时检查正样本命中和负样本为空。`run_seeded` 的输出包含 `report` 与 `predictions`，独立 `memory_eval` 需要的是其中的预测映射，不是整个 Runner 输出文件。
 
 较大记忆库中的词面召回边界由 `tests/test_memory_retrieval_scale.py` 覆盖：220 条高重要性干扰记录下，低重要性的较早记忆仍能通过问题片段被召回。运行 `python -m pytest -q tests/test_memory_retrieval_scale.py`。该场景不调用模型，适合在调整 FTS 查询或候选上限时做确定性回归。
+
+## 分层记忆机制回归
+
+```bash
+python -m eval.run_memory_layers --min-pass-rate 1
+python -m eval.run_memory_layers --seed 331456 --min-pass-rate 1 \
+  --out /tmp/memoria-memory-layers.json
+python -m pytest -q tests/test_memory_layers_eval.py
+```
+
+Runner 调用真实 `Store/EpisodicMemory/MemoryEngine/SkillCatalog/PromptAssembler/ContextBudget/TurnMemoryBudget`，在临时 SQLite 和临时技能文件上收集 observed，预期值仅参与评分。共 15 项检查：跨会话相关性与无关拒答、来源 ID、TTL/固定保护、dry-run 无副作用、容量归档与语义保留、来源删除、待审不注入、技能指纹重载、超长事实与技能共存、最新请求/帧保护、工具完整配对、整轮读取次数/字符配额。故障或门槛未达返回非零退出码；`--min-pass-rate` 必须在 0–1。
+
+报告包含日期、seed、协议、配置边界、Python/SQLite 版本、各项 observed/expected/pass 和总体通过率；TTL 用固定时钟推进两天，容量/字符用小值强制触发边界。2026-10-09 的[报告](results/memory_layers_regression.json)为 15/15，通过率 1。**这是十五项已知合成机制回归，不是公开集成绩、真实问答质量、模型 token 成本或延迟测试。**生产默认预算和 TTL 与强制触发边界的评估参数不同，具体见报告 `limits`。
+
+长会话摘要完整性、并发 CAS 和摘要失败回退另由 `tests/test_incremental_compaction.py` 验证；这些检查不能证明真实模型摘要逐事实保真。调参方案见[记忆分层 README](../docs/memory-layers/README.md)。
 
 ## Memory Governance + Multi-Agent Shared Memory 小型评测
 
