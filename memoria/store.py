@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -13,7 +15,18 @@ from .vector_index import SQLiteVecIndex
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
+_UNSET = object()
+
+
+def normalize_time(value: str) -> str:
+    """Compare one UTC ISO representation; naive input is interpreted as UTC."""
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds")
 
 
 def after(seconds: int) -> str:
@@ -24,12 +37,18 @@ class MemorySourceUnavailable(ValueError):
     """The original user message disappeared before a reviewed write."""
 
 
+class MemoryVersionConflict(ValueError):
+    """A replacement target changed before this transaction acquired the lock."""
+
+
 class Store:
     def __init__(self, path: Path, vector_backend: str = "auto"):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.lock = threading.RLock()
+        self.embedding_namespace = "legacy"
+        self.vector_backend = vector_backend
         with self.lock:
             self.db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -129,6 +148,7 @@ class Store:
             memory_columns = {row[1] for row in self.db.execute("PRAGMA table_info(memories)").fetchall()}
             migrations = {
                 "embedding": "ALTER TABLE memories ADD COLUMN embedding TEXT",
+                "embedding_model": "ALTER TABLE memories ADD COLUMN embedding_model TEXT NOT NULL DEFAULT 'legacy'",
                 "status": "ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
                 "reinforcement": "ALTER TABLE memories ADD COLUMN reinforcement INTEGER NOT NULL DEFAULT 1",
                 "supersedes_id": "ALTER TABLE memories ADD COLUMN supersedes_id TEXT",
@@ -175,33 +195,123 @@ class Store:
                 id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, summary TEXT NOT NULL,
                 created_at TEXT NOT NULL)""")
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_memory_evolutions_mem ON memory_evolutions(memory_id, created_at DESC)")
+            self.db.execute("""CREATE TABLE IF NOT EXISTS memory_validity_intervals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                valid_at TEXT NOT NULL, invalid_at TEXT,
+                CHECK(invalid_at IS NULL OR invalid_at>=valid_at))""")
+            self.db.execute("CREATE INDEX IF NOT EXISTS idx_memory_validity ON memory_validity_intervals(memory_id,valid_at,invalid_at)")
+            self._migrate_validity_intervals()
+            self.db.execute("""CREATE TABLE IF NOT EXISTS memory_embeddings (
+                memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                namespace TEXT NOT NULL, dimension INTEGER NOT NULL, embedding TEXT NOT NULL,
+                updated_at TEXT NOT NULL, PRIMARY KEY(memory_id,namespace,dimension))""")
+            for row in self.db.execute("SELECT id,embedding,embedding_model,updated_at FROM memories WHERE embedding IS NOT NULL").fetchall():
+                try:
+                    vector = json.loads(row["embedding"])
+                    self._validate_vector(vector)
+                except (ValueError, TypeError):
+                    continue
+                self.db.execute("""INSERT OR IGNORE INTO memory_embeddings
+                    (memory_id,namespace,dimension,embedding,updated_at) VALUES (?,?,?,?,?)""",
+                    (row["id"], row["embedding_model"], len(vector), row["embedding"], row["updated_at"]))
             self._init_fts()
             self.vector_index = SQLiteVecIndex(self.db, vector_backend)
             self._bootstrap_vector_index()
             self.db.commit()
 
-    def _bootstrap_vector_index(self) -> None:
-        rows = [dict(row) for row in self.db.execute("SELECT id,embedding FROM memories WHERE embedding IS NOT NULL ORDER BY updated_at DESC")]
-        expected_dimension = None
-        valid = []
-        for item in rows:
+    @contextmanager
+    def _memory_transaction(self):
+        """Serialize a lifecycle write; a caller retains ownership of its transaction."""
+        with self.lock:
+            owns = not self.db.in_transaction
+            savepoint = "memory_" + uuid.uuid4().hex
+            self.db.execute("BEGIN IMMEDIATE" if owns else f"SAVEPOINT {savepoint}")
             try:
-                vector = json.loads(item["embedding"])
-            except (json.JSONDecodeError, TypeError):
-                vector = None
-            if not isinstance(vector, list) or not vector:
-                self.db.execute("UPDATE memories SET embedding=NULL WHERE id=?", (item["id"],))
-                continue
-            expected_dimension = expected_dimension or len(vector)
-            if len(vector) != expected_dimension:
-                self.db.execute("UPDATE memories SET embedding=NULL WHERE id=?", (item["id"],))
-                continue
-            valid.append(item)
-        self.vector_index.bootstrap(valid)
+                yield
+                self.db.execute("COMMIT" if owns else f"RELEASE SAVEPOINT {savepoint}")
+            except BaseException:
+                if owns:
+                    self.db.execute("ROLLBACK")
+                else:
+                    self.db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                    self.db.execute(f"RELEASE SAVEPOINT {savepoint}")
+                raise
 
-    def _prepare_vector_dimension(self, vector: list[float], keep_id: str) -> None:
-        if self.vector_index.enabled and self.vector_index.dimension not in {None, len(vector)}:
-            self.db.execute("UPDATE memories SET embedding=NULL WHERE id<>?", (keep_id,))
+    def _migrate_validity_intervals(self) -> None:
+        # Only migrate rows with no intervals. Existing lifecycle history is immutable.
+        rows = self.db.execute("""SELECT * FROM memories m WHERE NOT EXISTS
+            (SELECT 1 FROM memory_validity_intervals v WHERE v.memory_id=m.id)""").fetchall()
+        for row in rows:
+            start = normalize_time(row["valid_at"] or row["created_at"])
+            replacement = self.db.execute("SELECT MIN(created_at) FROM memory_replacements WHERE old_memory_id=?", (row["id"],)).fetchone()[0]
+            end = row["invalid_at"] or replacement
+            if end is None and row["status"] != "active":
+                end = row["updated_at"]
+            end = normalize_time(end) if end else None
+            if end and end < start:
+                start = normalize_time(row["created_at"])
+            self.db.execute("INSERT INTO memory_validity_intervals(memory_id,valid_at,invalid_at) VALUES (?,?,?)", (row["id"], start, end))
+            # Old releases retained undo timestamps but only flipped status.
+            if row["status"] == "active" and end:
+                restored = self.db.execute("""SELECT MAX(undone_at) FROM memory_operations
+                    WHERE previous_id=? AND action='supersede' AND undone_at IS NOT NULL""", (row["id"],)).fetchone()[0]
+                if restored and normalize_time(restored) >= end:
+                    start, end = normalize_time(restored), None
+                    self.db.execute("INSERT INTO memory_validity_intervals(memory_id,valid_at,invalid_at) VALUES (?,?,NULL)", (row["id"], start))
+            self.db.execute("UPDATE memories SET valid_at=?,invalid_at=? WHERE id=?", (start, end, row["id"]))
+
+    def _open_interval(self, memory_id: str, timestamp: str) -> None:
+        self.db.execute("INSERT INTO memory_validity_intervals(memory_id,valid_at) VALUES (?,?)", (memory_id, timestamp))
+        self.db.execute("UPDATE memories SET valid_at=?,invalid_at=NULL WHERE id=?", (timestamp, memory_id))
+        vector = self.db.execute("""SELECT embedding,dimension FROM memory_embeddings
+            WHERE memory_id=? AND namespace=? ORDER BY updated_at DESC LIMIT 1""", (memory_id, self.embedding_namespace)).fetchone()
+        if vector and self.vector_index.dimension in {None, vector["dimension"]}:
+            self.vector_index.upsert(memory_id, json.loads(vector["embedding"]))
+
+    def _close_interval(self, memory_id: str, timestamp: str) -> None:
+        self.db.execute("UPDATE memory_validity_intervals SET invalid_at=? WHERE memory_id=? AND invalid_at IS NULL", (timestamp, memory_id))
+        self.db.execute("UPDATE memories SET invalid_at=? WHERE id=?", (timestamp, memory_id))
+        self.vector_index.delete(memory_id)
+
+    @staticmethod
+    def _validate_vector(vector: list[float]) -> None:
+        if not isinstance(vector, list) or not vector or len(vector) > 65536 or any(
+            not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+            for value in vector
+        ) or not any(vector):
+            raise ValueError("embedding 必须为非零、有限数值组成的向量")
+
+    def configure_embedding(self, namespace: str) -> None:
+        if namespace == self.embedding_namespace:
+            return
+        with self._memory_transaction():
+            self.embedding_namespace = namespace
+            self.vector_index = SQLiteVecIndex(self.db, self.vector_backend, namespace)
+            self._bootstrap_vector_index()
+
+    def _bootstrap_vector_index(self) -> None:
+        rows = self.db.execute("""SELECT e.memory_id AS id,e.embedding,e.dimension FROM memory_embeddings e
+            JOIN memories m ON m.id=e.memory_id WHERE e.namespace=? AND m.status='active'
+            ORDER BY e.updated_at DESC""", (self.embedding_namespace,)).fetchall()
+        if not rows:
+            self.vector_index.bootstrap([])
+            return
+        # A dimension change selects a separate index; previous dimensions remain persisted.
+        dimension = rows[0]["dimension"]
+        self.vector_index.bootstrap([dict(row) for row in rows if row["dimension"] == dimension])
+
+    def _persist_embedding(self, memory_id: str, vector: list[float], namespace: str | None = None) -> None:
+        self._validate_vector(vector)
+        raw = json.dumps(vector)
+        namespace = namespace or self.embedding_namespace
+        self.db.execute("""INSERT INTO memory_embeddings(memory_id,namespace,dimension,embedding,updated_at)
+            VALUES (?,?,?,?,?) ON CONFLICT(memory_id,namespace,dimension)
+            DO UPDATE SET embedding=excluded.embedding,updated_at=excluded.updated_at""",
+            (memory_id, namespace, len(vector), raw, now()))
+        self.db.execute("UPDATE memories SET embedding=?,embedding_model=? WHERE id=?", (raw, namespace, memory_id))
+        if namespace == self.embedding_namespace:
+            self.vector_index.upsert(memory_id, vector)
 
     def _init_fts(self) -> None:
         try:
@@ -526,13 +636,23 @@ class Store:
             row = self.db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
         return self._memory(dict(row)) if row else None
 
+    def _memory_at(self, row: dict[str, Any], timestamp: str) -> dict[str, Any]:
+        item = self._memory(row)
+        with self.lock:
+            interval = self.db.execute("""SELECT valid_at,invalid_at FROM memory_validity_intervals
+                WHERE memory_id=? AND valid_at<=? AND (invalid_at IS NULL OR invalid_at>?)
+                ORDER BY valid_at DESC LIMIT 1""", (item["id"], timestamp, timestamp)).fetchone()
+        if interval:
+            item.update(dict(interval))
+        return item
+
     def _require_memory_source(self, source_ref: str | None) -> None:
         # Called inside the same write transaction as the memory mutation.
         row = self.db.execute("SELECT role FROM messages WHERE id=?", (source_ref,)).fetchone()
         if row is None or row["role"] != "user":
             raise MemorySourceUnavailable("来源用户消息已删除，不能批准悬空记忆")
 
-    def add_memory(self, content: str, kind: str = "fact", importance: int = 3, source: str = "manual", embedding: list[float] | None = None, supersedes_id: str | None = None, reason: str = "", source_ref: str | None = None, *, require_source: bool = False) -> dict[str, Any]:
+    def add_memory(self, content: str, kind: str = "fact", importance: int = 3, source: str = "manual", embedding: list[float] | None = None, supersedes_id: str | None = None, reason: str = "", source_ref: str | None = None, *, require_source: bool = False, embedding_namespace: str | None = None) -> dict[str, Any]:
         timestamp = now()
         item = {
             "id": uuid.uuid4().hex, "content": content.strip(), "kind": kind,
@@ -543,37 +663,34 @@ class Store:
             "supersedes_id": supersedes_id, "last_reinforced_at": None,
             "source_ref": source_ref,
         }
-        with self.lock:
-            self.db.execute("BEGIN IMMEDIATE")
-            try:
-                if require_source:
-                    self._require_memory_source(source_ref)
-                previous = None
-                if supersedes_id:
-                    previous = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active' AND kind=?", (supersedes_id, kind)).fetchone()
-                    if previous is None:
-                        item["supersedes_id"] = None
-                self.db.execute("""INSERT INTO memories
-                    (id,content,kind,importance,source,created_at,updated_at,embedding,status,reinforcement,supersedes_id,last_reinforced_at,source_ref)
-                    VALUES (:id,:content,:kind,:importance,:source,:created_at,:updated_at,:embedding,:status,:reinforcement,:supersedes_id,:last_reinforced_at,:source_ref)""", item)
-                self.db.execute("INSERT INTO memories_fts(id,content) VALUES (?,?)", (item["id"], item["content"]))
-                if embedding:
-                    self._prepare_vector_dimension(embedding, item["id"])
-                    self.vector_index.upsert(item["id"], embedding)
-                if previous is not None:
-                    self.db.execute("UPDATE memories SET status='superseded',updated_at=? WHERE id=?", (timestamp, supersedes_id))
-                    self.db.execute("""INSERT INTO memory_replacements
-                        (old_memory_id,new_memory_id,old_content,new_content,relation,reason,created_at)
-                        VALUES (?,?,?,?,?,?,?)""", (supersedes_id, item["id"], previous["content"], item["content"], "supersede", reason[:500], timestamp))
-                if source_ref:
-                    self.db.execute("""INSERT OR IGNORE INTO memory_operations
-                        (id,source_ref,memory_id,action,previous_id,created_at,undone_at) VALUES (?,?,?,?,?,?,NULL)""",
-                        (uuid.uuid4().hex, source_ref, item["id"], "supersede" if previous is not None else "create", supersedes_id if previous is not None else None, timestamp))
-                self.db.execute("COMMIT")
-            except Exception:
-                self.db.execute("ROLLBACK")
-                raise
-        return self._memory(item)
+        with self._memory_transaction():
+            timestamp = now()
+            item["created_at"] = item["updated_at"] = timestamp
+            if require_source:
+                self._require_memory_source(source_ref)
+            previous = None
+            if supersedes_id:
+                previous = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active' AND kind=?", (supersedes_id, kind)).fetchone()
+                if previous is None:
+                    raise MemoryVersionConflict("被替代记忆已失效、不存在或类型不匹配，请重新检查当前版本")
+            self.db.execute("""INSERT INTO memories
+                (id,content,kind,importance,source,created_at,updated_at,embedding,status,reinforcement,supersedes_id,last_reinforced_at,source_ref)
+                VALUES (:id,:content,:kind,:importance,:source,:created_at,:updated_at,:embedding,:status,:reinforcement,:supersedes_id,:last_reinforced_at,:source_ref)""", item)
+            self._open_interval(item["id"], timestamp)
+            self.db.execute("INSERT INTO memories_fts(id,content) VALUES (?,?)", (item["id"], item["content"]))
+            if embedding:
+                self._persist_embedding(item["id"], embedding, embedding_namespace)
+            if previous is not None:
+                self._close_interval(supersedes_id, timestamp)
+                self.db.execute("UPDATE memories SET status='superseded',updated_at=? WHERE id=?", (timestamp, supersedes_id))
+                self.db.execute("""INSERT INTO memory_replacements
+                    (old_memory_id,new_memory_id,old_content,new_content,relation,reason,created_at)
+                    VALUES (?,?,?,?,?,?,?)""", (supersedes_id, item["id"], previous["content"], item["content"], "supersede", reason[:500], timestamp))
+            if source_ref:
+                self.db.execute("""INSERT OR IGNORE INTO memory_operations
+                    (id,source_ref,memory_id,action,previous_id,created_at,undone_at) VALUES (?,?,?,?,?,?,NULL)""",
+                    (uuid.uuid4().hex, source_ref, item["id"], "supersede" if previous is not None else "create", supersedes_id if previous is not None else None, timestamp))
+        return self.memory(item["id"])
 
     def reinforce_memory(self, memory_id: str, source_ref: str | None = None, *, require_source: bool = False) -> dict[str, Any] | None:
         timestamp = now()
@@ -583,6 +700,12 @@ class Store:
             try:
                 if require_source:
                     self._require_memory_source(source_ref)
+                duplicate = source_ref and self.db.execute(
+                    "SELECT 1 FROM memory_operations WHERE source_ref=? AND memory_id=?", (source_ref, memory_id)
+                ).fetchone()
+                if duplicate:
+                    self.db.execute("COMMIT" if owns_transaction else "RELEASE SAVEPOINT memoria_reinforce")
+                    return self.memory(memory_id)
                 cur = self.db.execute("""UPDATE memories SET reinforcement=reinforcement+1,
                     last_reinforced_at=?,updated_at=? WHERE id=? AND status='active'""", (timestamp, timestamp, memory_id))
                 if cur.rowcount and source_ref:
@@ -634,74 +757,66 @@ class Store:
     def correct_memory(
         self, memory_id: str, content: str, kind: str, importance: int,
         reason: str, embedding: list[float] | None = None,
+        *, embedding_namespace: str | None = None,
     ) -> dict[str, Any] | None:
         """Replace one active version atomically, retaining the user's correction trail."""
         timestamp = now()
-        with self.lock:
-            self.db.execute("BEGIN IMMEDIATE")
-            try:
-                previous = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active'", (memory_id,)).fetchone()
-                if previous is None:
-                    self.db.execute("ROLLBACK")
-                    return None
-                content = content.strip()
-                if (content, kind, importance) == (previous["content"], previous["kind"], previous["importance"]):
-                    raise ValueError("纠正内容与当前记忆相同")
-                item = {
-                    "id": uuid.uuid4().hex, "content": content, "kind": kind,
-                    "importance": importance, "source": "user_correction",
-                    "created_at": timestamp, "updated_at": timestamp,
-                    "embedding": json.dumps(embedding) if embedding else None,
-                    "status": "active", "reinforcement": 1,
-                    "supersedes_id": memory_id, "last_reinforced_at": None,
-                    "source_ref": None,
-                }
-                self.db.execute("""INSERT INTO memories
-                    (id,content,kind,importance,source,created_at,updated_at,embedding,status,reinforcement,supersedes_id,last_reinforced_at,source_ref)
-                    VALUES (:id,:content,:kind,:importance,:source,:created_at,:updated_at,:embedding,:status,:reinforcement,:supersedes_id,:last_reinforced_at,:source_ref)""", item)
-                self.db.execute("INSERT INTO memories_fts(id,content) VALUES (?,?)", (item["id"], content))
-                if embedding:
-                    self._prepare_vector_dimension(embedding, item["id"])
-                    self.vector_index.upsert(item["id"], embedding)
-                self.db.execute("UPDATE memories SET status='superseded',updated_at=? WHERE id=?", (timestamp, memory_id))
-                self.db.execute("""INSERT INTO memory_replacements
-                    (old_memory_id,new_memory_id,old_content,new_content,relation,reason,created_at)
-                    VALUES (?,?,?,?,'correction',?,?)""",
-                    (memory_id, item["id"], previous["content"], content, reason.strip(), timestamp))
-                self.db.execute("COMMIT")
-            except Exception:
-                self.db.execute("ROLLBACK")
-                raise
+        with self._memory_transaction():
+            timestamp = now()
+            previous = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active'", (memory_id,)).fetchone()
+            if previous is None:
+                return None
+            content = content.strip()
+            if (content, kind, importance) == (previous["content"], previous["kind"], previous["importance"]):
+                raise ValueError("纠正内容与当前记忆相同")
+            item = {
+                "id": uuid.uuid4().hex, "content": content, "kind": kind,
+                "importance": importance, "source": "user_correction",
+                "created_at": timestamp, "updated_at": timestamp,
+                "embedding": json.dumps(embedding) if embedding else None,
+                "status": "active", "reinforcement": 1,
+                "supersedes_id": memory_id, "last_reinforced_at": None,
+                "source_ref": None,
+            }
+            self.db.execute("""INSERT INTO memories
+                (id,content,kind,importance,source,created_at,updated_at,embedding,status,reinforcement,supersedes_id,last_reinforced_at,source_ref)
+                VALUES (:id,:content,:kind,:importance,:source,:created_at,:updated_at,:embedding,:status,:reinforcement,:supersedes_id,:last_reinforced_at,:source_ref)""", item)
+            self._open_interval(item["id"], timestamp)
+            self.db.execute("INSERT INTO memories_fts(id,content) VALUES (?,?)", (item["id"], content))
+            if embedding:
+                self._persist_embedding(item["id"], embedding, embedding_namespace)
+            self._close_interval(memory_id, timestamp)
+            self.db.execute("UPDATE memories SET status='superseded',updated_at=? WHERE id=?", (timestamp, memory_id))
+            self.db.execute("""INSERT INTO memory_replacements
+                (old_memory_id,new_memory_id,old_content,new_content,relation,reason,created_at)
+                VALUES (?,?,?,?,'correction',?,?)""",
+                (memory_id, item["id"], previous["content"], content, reason.strip(), timestamp))
         return self.memory(item["id"])
 
     def update_memory(self, memory_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Compatibility edit entry: preserve the previous version just like PATCH."""
         current = self.memory(memory_id)
         if not current:
             return None
-        previous_content = current["content"]
-        current.update({k: v for k, v in data.items() if k in {"content", "kind", "importance"} and v is not None})
-        current["importance"] = max(1, min(5, int(current["importance"])))
-        current["updated_at"] = now()
-        with self.lock:
-            content_changed = current["content"] != previous_content
-            self.db.execute("UPDATE memories SET content=?,kind=?,importance=?,updated_at=?,embedding=CASE WHEN ? THEN NULL ELSE embedding END WHERE id=?", (current["content"], current["kind"], current["importance"], current["updated_at"], content_changed, memory_id))
-            if content_changed:
-                self.db.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
-                self.db.execute("INSERT INTO memories_fts(id,content) VALUES (?,?)", (memory_id, current["content"]))
-                self.vector_index.delete(memory_id)
-            self.db.commit()
-        if content_changed: current["embedding"] = None
-        return current
+        content = data.get("content") if data.get("content") is not None else current["content"]
+        kind = data.get("kind") if data.get("kind") is not None else current["kind"]
+        importance = max(1, min(5, int(data.get("importance") if data.get("importance") is not None else current["importance"])))
+        if (content.strip(), kind, importance) == (current["content"], current["kind"], current["importance"]):
+            return current
+        vector = current.get("embedding") if content.strip() == current["content"] else None
+        return self.correct_memory(memory_id, content, kind, importance, "通过存储接口编辑", vector,
+                                   embedding_namespace=self.embedding_namespace)
 
     def set_memory_embedding(self, memory_id: str, embedding: list[float]) -> None:
-        with self.lock:
-            self._prepare_vector_dimension(embedding, memory_id)
-            self.db.execute("UPDATE memories SET embedding=? WHERE id=?", (json.dumps(embedding), memory_id))
-            self.vector_index.upsert(memory_id, embedding)
-            self.db.commit()
+        with self._memory_transaction():
+            if not self.db.execute("SELECT 1 FROM memories WHERE id=?", (memory_id,)).fetchone():
+                return
+            self._persist_embedding(memory_id, embedding)
 
-    def vector_memory_candidates(self, vector: list[float], limit: int = 100) -> list[tuple[dict[str, Any], float]]:
+    def vector_memory_candidates(self, vector: list[float], limit: int = 100, *, namespace: str | None = None) -> list[tuple[dict[str, Any], float]]:
         with self.lock:
+            if namespace and namespace != self.embedding_namespace:
+                return []
             matches = self.vector_index.search(vector, limit)
             result = []
             for memory_id, similarity in matches:
@@ -713,11 +828,16 @@ class Store:
     @property
     def vector_index_status(self) -> dict[str, Any]:
         with self.lock:
-            return {"enabled": self.vector_index.enabled, "backend": "sqlite-vec" if self.vector_index.enabled else "json", "dimension": self.vector_index.dimension, "error": self.vector_index.error}
+            return {"enabled": self.vector_index.enabled, "backend": "sqlite-vec" if self.vector_index.enabled else "json", "dimension": self.vector_index.dimension, "namespace": self.embedding_namespace, "error": self.vector_index.error}
 
-    @staticmethod
-    def _memory(item: dict[str, Any]) -> dict[str, Any]:
+    def _memory(self, item: dict[str, Any]) -> dict[str, Any]:
         result = dict(item)
+        with self.lock:
+            selected = self.db.execute("""SELECT embedding,dimension FROM memory_embeddings
+                WHERE memory_id=? AND namespace=? ORDER BY updated_at DESC LIMIT 1""",
+                (result["id"], self.embedding_namespace)).fetchone()
+        result["embedding"] = selected["embedding"] if selected else None
+        result["embedding_model"] = self.embedding_namespace if selected else None
         raw = result.get("embedding")
         if isinstance(raw, str):
             try: result["embedding"] = json.loads(raw)
@@ -726,7 +846,7 @@ class Store:
         result.setdefault("reinforcement", 1)
         result.setdefault("supersedes_id", None)
         result.setdefault("last_reinforced_at", None)
-        return result
+        return self._temporal(result)
 
     def delete_memory(self, memory_id: str) -> bool:
         with self.lock:
@@ -901,16 +1021,20 @@ class Store:
                 rows = self.db.execute("SELECT m.*, s.title session_title FROM messages m JOIN sessions s ON s.id=m.session_id WHERE m.content LIKE ? ORDER BY m.created_at DESC LIMIT ?", (f"%{query}%", limit)).fetchall()
         return [dict(row) for row in rows]
 
-    def keyword_memory_candidates(self, query: str, limit: int = 100) -> list[dict[str, Any]]:
+    def keyword_memory_candidates(self, query: str, limit: int = 100, *, as_of: str | None = None) -> list[dict[str, Any]]:
         if not query.strip() or limit <= 0:
             return []
+        timestamp = normalize_time(as_of) if as_of else None
+        temporal = "EXISTS (SELECT 1 FROM memory_validity_intervals v WHERE v.memory_id=m.id AND v.valid_at<=? AND (v.invalid_at IS NULL OR v.invalid_at>?))"
+        scope = temporal if timestamp else "m.status='active'"
+        scope_params = (timestamp, timestamp) if timestamp else ()
         with self.lock:
             rows: list[sqlite3.Row] = []
             try:
                 match = f'"{query.replace(chr(34), chr(34)*2)}"'
-                rows = self.db.execute("""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.id
-                    WHERE memories_fts MATCH ? AND m.status='active'
-                    ORDER BY bm25(memories_fts),m.importance DESC LIMIT ?""", (match, limit)).fetchall()
+                rows = self.db.execute(f"""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.id
+                    WHERE memories_fts MATCH ? AND {scope}
+                    ORDER BY bm25(memories_fts),m.importance DESC LIMIT ?""", (match, *scope_params, limit)).fetchall()
             except sqlite3.OperationalError:
                 pass
             # A full question rarely occurs verbatim in a stored fact. Search its
@@ -920,9 +1044,9 @@ class Store:
             if terms and len(rows) < limit:
                 match = " OR ".join(f'"{term}"' for term in terms)
                 try:
-                    fragments = self.db.execute("""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.id
-                        WHERE memories_fts MATCH ? AND m.status='active'
-                        ORDER BY bm25(memories_fts),m.importance DESC LIMIT ?""", (match, limit)).fetchall()
+                    fragments = self.db.execute(f"""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.id
+                        WHERE memories_fts MATCH ? AND {scope}
+                        ORDER BY bm25(memories_fts),m.importance DESC LIMIT ?""", (match, *scope_params, limit)).fetchall()
                     seen = {row["id"] for row in rows}
                     rows.extend(row for row in fragments if row["id"] not in seen)
                 except sqlite3.OperationalError:
@@ -932,15 +1056,15 @@ class Store:
                     # cannot match a Chinese three-character substring.
                     where = " OR ".join("INSTR(lower(content), ?) > 0" for _ in terms)
                     fragments = self.db.execute(
-                        f"SELECT * FROM memories WHERE status='active' AND ({where}) "
+                        f"SELECT m.* FROM memories m WHERE {scope} AND ({where}) "
                         "ORDER BY importance DESC, updated_at DESC LIMIT ?",
-                        (*terms, limit),
+                        (*scope_params, *terms, limit),
                     ).fetchall()
                     seen = {row["id"] for row in rows}
                     rows.extend(row for row in fragments if row["id"] not in seen)
             if not rows:
-                rows = self.db.execute("SELECT * FROM memories WHERE status='active' AND content LIKE ? ORDER BY importance DESC LIMIT ?", (f"%{query}%", limit)).fetchall()
-        return [self._memory(dict(row)) for row in rows[:limit]]
+                rows = self.db.execute(f"SELECT m.* FROM memories m WHERE {scope} AND content LIKE ? ORDER BY importance DESC LIMIT ?", (*scope_params, f"%{query}%", limit)).fetchall()
+        return [self._memory_at(dict(row), timestamp) if timestamp else self._memory(dict(row)) for row in rows[:limit]]
 
     @staticmethod
     def _memory_search_terms(query: str) -> list[str]:
@@ -1093,30 +1217,44 @@ class Store:
 
     def undo_memory_sources(self, source_refs: list[str], dry_run: bool = False) -> dict[str, list[str]]:
         refs = [ref for ref in dict.fromkeys(source_refs) if ref]
-        if not refs: return {"affected_ids": [], "restored_ids": []}
+        if not refs:
+            return {"affected_ids": [], "restored_ids": []}
         marks = ",".join("?" for _ in refs)
-        with self.lock:
+        with self._memory_transaction():
             operations = self.db.execute(f"SELECT * FROM memory_operations WHERE source_ref IN ({marks}) AND undone_at IS NULL", refs).fetchall()
-            state_affected = []
+            withdrawn = {row[0] for row in self.db.execute(
+                f"SELECT memory_id FROM memory_operations WHERE action IN ('create','supersede') AND (undone_at IS NOT NULL OR source_ref IN ({marks}))", refs)}
+            state_affected, restored = [], []
             for row in operations:
                 current = self.db.execute("SELECT status FROM memories WHERE id=?", (row["memory_id"],)).fetchone()
-                if row["action"] in {"create", "supersede"} and current and current[0] == "active":
-                    state_affected.append(row["memory_id"])
+                if row["action"] not in {"create", "supersede"} or not current or current[0] != "active":
+                    continue
+                state_affected.append(row["memory_id"])
+                previous_id, seen = row["previous_id"], set()
+                while previous_id and previous_id not in seen:
+                    seen.add(previous_id)
+                    previous = self.db.execute("SELECT id,status,supersedes_id FROM memories WHERE id=?", (previous_id,)).fetchone()
+                    if previous is None:
+                        break
+                    if previous_id not in withdrawn:
+                        if previous["status"] != "active":
+                            restored.append(previous_id)
+                        break
+                    previous_id = previous["supersedes_id"]
+            state_affected, restored = list(dict.fromkeys(state_affected)), list(dict.fromkeys(restored))
             reinforced = [row["memory_id"] for row in operations if row["action"] == "reinforce"]
             affected = list(dict.fromkeys([*state_affected, *reinforced]))
-            restored = list(dict.fromkeys(row["previous_id"] for row in operations if row["action"] == "supersede" and row["memory_id"] in state_affected and row["previous_id"]))
             if not dry_run:
                 timestamp = now()
-                if state_affected:
-                    q = ",".join("?" for _ in state_affected)
-                    self.db.execute(f"UPDATE memories SET status='superseded',updated_at=? WHERE id IN ({q})", (timestamp, *state_affected))
-                if restored:
-                    q = ",".join("?" for _ in restored)
-                    self.db.execute(f"UPDATE memories SET status='active',updated_at=? WHERE id IN ({q})", (timestamp, *restored))
+                for memory_id in state_affected:
+                    self._close_interval(memory_id, timestamp)
+                    self.db.execute("UPDATE memories SET status='superseded',updated_at=? WHERE id=?", (timestamp, memory_id))
+                for memory_id in restored:
+                    self._open_interval(memory_id, timestamp)
+                    self.db.execute("UPDATE memories SET status='active',updated_at=? WHERE id=?", (timestamp, memory_id))
                 for memory_id in reinforced:
                     self.db.execute("UPDATE memories SET reinforcement=MAX(1,reinforcement-1),updated_at=? WHERE id=?", (timestamp, memory_id))
                 self.db.execute(f"UPDATE memory_operations SET undone_at=? WHERE source_ref IN ({marks}) AND undone_at IS NULL", (timestamp, *refs))
-                self.db.commit()
         return {"affected_ids": affected, "restored_ids": restored}
 
     def add_trace(self, session_id: str, status: str, steps: int, duration_ms: int, memories: list[dict], tools: list[dict], error: str | None = None, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1171,35 +1309,46 @@ class Store:
         except Exception: item["provenance"] = {}
         return item
 
-    def set_temporal(self, memory_id: str, valid_at: str | None = None, invalid_at: str | None = None) -> dict | None:
-        with self.lock:
+    def set_temporal(self, memory_id: str, valid_at: Any = _UNSET, invalid_at: Any = _UNSET) -> dict | None:
+        """Edit only the latest interval. Omitted end time is never cleared."""
+        with self._memory_transaction():
             row = self.db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
-            if not row: return None
-            item = dict(row)
-            item["valid_at"] = valid_at or item.get("valid_at") or item.get("created_at")
-            item["invalid_at"] = invalid_at
-            self.db.execute("UPDATE memories SET valid_at=?, invalid_at=?, updated_at=? WHERE id=?", (item["valid_at"], invalid_at, now(), memory_id))
-            self.db.commit()
+            if not row:
+                return None
+            start = row["valid_at"] if valid_at is _UNSET else normalize_time(valid_at or row["created_at"])
+            end = row["invalid_at"] if invalid_at is _UNSET else (normalize_time(invalid_at) if invalid_at else None)
+            if end and end < start:
+                raise ValueError("失效时间不能早于生效时间")
+            self.db.execute("UPDATE memories SET valid_at=?,invalid_at=?,updated_at=? WHERE id=?", (start, end, now(), memory_id))
+            self.db.execute("""UPDATE memory_validity_intervals SET valid_at=?,invalid_at=? WHERE id=
+                (SELECT MAX(id) FROM memory_validity_intervals WHERE memory_id=?)""", (start, end, memory_id))
         return self.memory(memory_id)
 
     def temporal_invalidate(self, old_id: str, new_id: str, invalid_at: str | None = None) -> None:
-        ts = invalid_at or now()
-        with self.lock:
-            self.db.execute("UPDATE memories SET invalid_at=? WHERE id=? AND invalid_at IS NULL", (ts, old_id))
-            self.db.execute("UPDATE memories SET valid_at=COALESCE(valid_at,?) WHERE id=?", (ts, new_id))
-            self.db.commit()
+        # Compatibility helper; normal replacement already commits both windows atomically.
+        with self._memory_transaction():
+            new = self.db.execute("SELECT valid_at FROM memories WHERE id=? AND supersedes_id=?", (new_id, old_id)).fetchone()
+            if not new:
+                raise ValueError("记忆之间不存在替代关系")
+            timestamp = normalize_time(invalid_at) if invalid_at else new["valid_at"]
+            self._close_interval(old_id, timestamp)
 
     def time_travel(self, as_of: str, limit: int = 100, query: str = "") -> list[dict]:
+        timestamp = normalize_time(as_of)
         with self.lock:
-            params: list = [as_of, as_of]
-            clause = "WHERE valid_at IS NOT NULL AND valid_at<=? AND (invalid_at IS NULL OR invalid_at>?)"
+            params: list = [timestamp, timestamp]
+            clause = """WHERE EXISTS (SELECT 1 FROM memory_validity_intervals v
+                WHERE v.memory_id=m.id AND v.valid_at<=? AND (v.invalid_at IS NULL OR v.invalid_at>?))"""
             if query:
-                clause += " AND content LIKE ?"; params.append(f"%{query}%")
-            rows = self.db.execute(f"SELECT * FROM memories {clause} ORDER BY importance DESC, updated_at DESC LIMIT ?", (*params, limit)).fetchall()
-        out = []
-        for row in rows:
-            item = self._memory(dict(row)); out.append(self._temporal(item))
-        return out
+                clause += " AND content LIKE ?"
+                params.append(f"%{query}%")
+            rows = self.db.execute(f"SELECT m.* FROM memories m {clause} ORDER BY importance DESC,created_at DESC LIMIT ?", (*params, limit)).fetchall()
+        return [self._memory_at(dict(row), timestamp) for row in rows]
+
+    def memory_validity(self, memory_id: str) -> list[dict]:
+        with self.lock:
+            return [dict(row) for row in self.db.execute(
+                "SELECT valid_at,invalid_at FROM memory_validity_intervals WHERE memory_id=? ORDER BY id", (memory_id,))]
 
     def add_memory_link(self, from_id: str, to_id: str, relation: str = "related", weight: float = 1.0) -> dict | None:
         if from_id == to_id: return None
@@ -1212,7 +1361,8 @@ class Store:
             except Exception: return None
         return item
 
-    def memory_neighbors(self, memory_id: str, depth: int = 1, limit: int = 20) -> list[dict]:
+    def memory_neighbors(self, memory_id: str, depth: int = 1, limit: int = 20, *, as_of: str | None = None) -> list[dict]:
+        timestamp = normalize_time(as_of) if as_of else None
         seen, frontier, out = {memory_id}, [memory_id], []
         with self.lock:
             for _ in range(max(1, depth)):
@@ -1220,14 +1370,23 @@ class Store:
                 q = ",".join("?" for _ in frontier)
                 rows = self.db.execute(f"SELECT * FROM memory_links WHERE from_id IN ({q}) OR to_id IN ({q})", (*frontier, *frontier)).fetchall()
                 frontier = []
-                for row in rows:
+                for row in sorted(rows, key=lambda r: r["weight"], reverse=True):
                     d = dict(row)
+                    if timestamp and normalize_time(d["created_at"]) > timestamp:
+                        continue
                     for other in (d["from_id"], d["to_id"]):
                         if other not in seen:
-                            seen.add(other); frontier.append(other)
-                            mem = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active'", (other,)).fetchone()
+                            seen.add(other)
+                            if timestamp:
+                                mem = self.db.execute("""SELECT m.* FROM memories m WHERE m.id=? AND EXISTS
+                                    (SELECT 1 FROM memory_validity_intervals v WHERE v.memory_id=m.id
+                                    AND v.valid_at<=? AND (v.invalid_at IS NULL OR v.invalid_at>?))""", (other, timestamp, timestamp)).fetchone()
+                            else:
+                                mem = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active'", (other,)).fetchone()
                             if mem:
-                                m = self._memory(dict(mem)); m["link_relation"] = d["relation"]; out.append(self._temporal(m))
+                                frontier.append(other)
+                                m = self._memory_at(dict(mem), timestamp) if timestamp else self._memory(dict(mem))
+                                m["link_relation"] = d["relation"]; m["link_weight"] = d["weight"]; out.append(m)
                             if len(out) >= limit: return out
         return out
 

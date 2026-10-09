@@ -23,7 +23,7 @@ from ..memory import export_memories_markdown
 from ..observability import MetricRegistry, RequestContext
 from ..security import RequestGate
 from ..service import AgentService
-from ..store import MemorySourceUnavailable, Store
+from ..store import MemorySourceUnavailable, MemoryVersionConflict, Store, normalize_time
 from .governance import governance_router
 
 MemoryKind = Literal["fact", "preference", "profile", "goal", "procedure"]
@@ -380,6 +380,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.exception_handler(GovernanceError)
     async def governance_error(request: Request, exc: GovernanceError):
         return _error(request, exc.status_code, _error_code(exc.status_code), exc.detail)
+
+    @app.exception_handler(MemoryVersionConflict)
+    async def memory_conflict(request: Request, exc: MemoryVersionConflict):
+        return _error(request, 409, "conflict", str(exc))
 
     @app.get("/api/health", response_model=HealthResponse, tags=["system"], summary="存活检查")
     def health() -> HealthResponse:
@@ -838,10 +842,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return Response(status_code=204)
 
     app.include_router(governance_router(governance, store, settings))
-    try:
-        _register_round13(app)
-    except Exception:
-        pass
+    _register_round13(app)
     dist = settings.root / "frontend" / "dist"
     if dist.exists():
         app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
@@ -869,9 +870,15 @@ def _register_round13(app):
     from fastapi import Query as _Q
 
     @app.get("/api/memories/time-travel", tags=["memories"], summary="时间旅行查询某时刻有效记忆")
-    def time_travel(as_of: str = _Q(min_length=4, max_length=40), q: str = _Q(default="", max_length=200), limit: int = _Q(default=20, ge=1, le=200)):
-        store = app.state.store
-        return store.time_travel(as_of, limit, q)
+    async def time_travel(as_of: str = _Q(min_length=4, max_length=40), q: str = _Q(default="", max_length=200), limit: int = _Q(default=20, ge=1, le=200)):
+        try:
+            timestamp = normalize_time(as_of)
+        except ValueError as exc:
+            raise HTTPException(422, "as_of 必须为 ISO 8601 时间") from exc
+        if q.strip():
+            return await app.state.service.runtime.memory.retrieve(q, limit=limit, as_of=timestamp)
+        return [{k: v for k, v in item.items() if k != "embedding"}
+                for item in app.state.store.time_travel(timestamp, limit)]
 
     @app.get("/api/memories/{memory_id}", tags=["memories"], summary="记忆详情(含邻居与演化链)")
     def memory_detail(memory_id: str):
@@ -880,6 +887,8 @@ def _register_round13(app):
         if not item: raise HTTPException(status_code=404, detail="memory not found")
         item["neighbors"] = store.memory_neighbors(memory_id, depth=1, limit=10)
         item["evolutions"] = store.memory_evolutions(memory_id)
+        item["validity_intervals"] = store.memory_validity(memory_id)
+        item.pop("embedding", None)
         return item
 
     @app.get("/api/memories/{memory_id}/neighbors", tags=["memories"], summary="记忆图邻居(一跳/多跳)")

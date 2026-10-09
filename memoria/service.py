@@ -101,7 +101,11 @@ class AgentService:
 
     def update_models(self, updates: dict[str, dict[str, str]]) -> dict[str, Any]:
         result = save_model_overrides(self.settings, updates)
-        self.embedder.config = self.settings.embedding
+        # In-flight embedding requests keep their original client/model identity.
+        self.embedder = EmbeddingClient(self.settings.embedding, min(self.settings.request_timeout_seconds, 30), self.settings.max_retries)
+        self.runtime.memory.embedder = self.embedder
+        if self.embedder.enabled:
+            self.store.configure_embedding(self.embedder.namespace)
         return result
 
     def models_public(self) -> dict[str, Any]:

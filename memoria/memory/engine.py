@@ -4,6 +4,7 @@ import asyncio
 import logging
 import math
 import re
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -46,6 +47,8 @@ class MemoryEngine:
     ):
         self.store = store
         self.embedder = embedder
+        if embedder and embedder.enabled:
+            self.store.configure_embedding(getattr(embedder, "namespace", "legacy"))
         self.decider = decider
         self.vector_scan_limit = max(100, vector_scan_limit)
         self.markdown = markdown
@@ -75,40 +78,43 @@ class MemoryEngine:
         current = self.store.memory(memory_id)
         if not current or current["status"] != "active": return None
         merged = f"{current['content']}；{new_info.strip()}"
-        result = await self.remember(merged, current["kind"], int(current["importance"]), "evolved", None)
-        if result.memory:
-            self.store.record_evolution(result.memory["id"], f"由 {memory_id} 演化: {reason or new_info[:120]}")
-        return result.memory
+        updated = await self.correct(memory_id, merged, current["kind"], int(current["importance"]), reason or "用户补充并演化记忆")
+        if updated:
+            self.store.record_evolution(updated["id"], f"由 {memory_id} 演化: {reason or new_info[:120]}")
+        return updated
 
     async def retrieve(self, query: str, limit: int = 8, kinds: set[str] | None = None, as_of: str | None = None, expand_graph: bool = True) -> list[dict]:
+        embedder = self.embedder
+        embedding_namespace = self.store.embedding_namespace
         lexical_query = self._lexical_query(query)
-        lexical_seed = self.store.keyword_memory_candidates(lexical_query, limit=200) if lexical_query else []
-        indexed = self.store.vector_index_status["enabled"]
-        items = self.store.memories(limit=200 if indexed else self.vector_scan_limit)
+        lexical_seed = self.store.keyword_memory_candidates(lexical_query, limit=200, as_of=as_of) if lexical_query else []
+        indexed = self.store.vector_index_status["enabled"] and not as_of
+        items = (self.store.time_travel(as_of, limit=self.vector_scan_limit) if as_of
+                 else self.store.memories(limit=200 if indexed else self.vector_scan_limit))
         if kinds:
             items = [item for item in items if item.get("kind") in kinds]
             lexical_seed = [item for item in lexical_seed if item.get("kind") in kinds]
-        if as_of:
-            items = self.store.time_travel(as_of, limit=max(1, limit * 3), query=query.strip())
-            if kinds: items = [i for i in items if i.get("kind") in kinds]
-            return [{k: v for k, v in i.items() if k != "embedding"} for i in items[:limit]]
         if not query.strip():
             return []
         by_id = {item["id"]: item for item in [*items, *lexical_seed]}
         items = list(by_id.values())
 
         query_vector: list[float] | None = None
-        if self.embedder and self.embedder.enabled:
+        if embedder and embedder.enabled:
             await self._backfill(items, limit=64)
             try:
-                query_vector = await asyncio.wait_for(self.embedder.embed(query), timeout=self.embedder.timeout_seconds + 1)
+                query_vector = await asyncio.wait_for(embedder.embed(query), timeout=embedder.timeout_seconds + 1)
             except Exception as exc:
                 logger.warning("语义记忆召回降级为关键词召回: %s", type(exc).__name__)
 
+        if embedding_namespace != self.store.embedding_namespace:
+            query_vector = None
         vector_scores: dict[str, float] = {}
         if query_vector:
+            status = self.store.vector_index_status
+            indexed = not as_of and status["enabled"] and status["dimension"] == len(query_vector)
             if indexed:
-                for item, similarity in self.store.vector_memory_candidates(query_vector, max(limit * 8, 64)):
+                for item, similarity in self.store.vector_memory_candidates(query_vector, max(limit * 8, 64), namespace=embedding_namespace):
                     if not kinds or item.get("kind") in kinds:
                         by_id[item["id"]] = item
                         vector_scores[item["id"]] = similarity
@@ -130,11 +136,11 @@ class MemoryEngine:
         semantic = sorted((item for item in items if vector_scores.get(item["id"], -1) >= semantic_floor), key=lambda item: vector_scores[item["id"]], reverse=True)
 
         doc_freq: dict[str, int] = {}
-        tokenized = {item["id"]: self._tokens(item["content"]) for item in items}
+        tokenized = {item["id"]: Counter(self._token_sequence(item["content"])) for item in items}
         for toks in tokenized.values():
             for token in toks: doc_freq[token] = doc_freq.get(token, 0) + 1
-        avg_len = sum(len(t) for t in tokenized.values()) / max(1, len(tokenized))
-        bm25_scores = {mid: self._bm25(query_tokens, toks, len(toks), avg_len, doc_freq, max(1, len(tokenized))) for mid, toks in tokenized.items()}
+        avg_len = sum(sum(t.values()) for t in tokenized.values()) / max(1, len(tokenized))
+        bm25_scores = {mid: self._bm25(query_tokens, toks, sum(toks.values()), avg_len, doc_freq, max(1, len(tokenized))) for mid, toks in tokenized.items()}
         bm25_ranked = sorted((mid for mid, sc in bm25_scores.items() if sc > 0), key=lambda m: bm25_scores[m], reverse=True)
         fused: dict[str, float] = {}
         lanes: dict[str, list[str]] = {"keyword": [item["id"] for item in lexical], "vector": [item["id"] for item in semantic], "bm25": bm25_ranked}
@@ -145,21 +151,25 @@ class MemoryEngine:
         ranked_ids = sorted(
             fused,
             key=lambda memory_id: (
-                fused[memory_id] + min(math.log1p(int(by_id[memory_id].get("reinforcement", 1))), 2.5) * 0.0005,
+                fused[memory_id] + (0 if as_of else min(math.log1p(int(by_id[memory_id].get("reinforcement", 1))), 2.5) * 0.0005),
                 int(by_id[memory_id]["importance"]),
             ),
             reverse=True,
         )
         if expand_graph and ranked_ids:
             try:
-                seen = set(ranked_ids)
-                for mid in list(ranked_ids)[:3]:
-                    for nb in self.store.memory_neighbors(mid, depth=1, limit=3):
-                        if nb["id"] not in seen and (not kinds or nb.get("kind") in kinds):
-                            seen.add(nb["id"]); by_id[nb["id"]] = nb
-                            fused[nb["id"]] = fused.get(nb["id"], 0.0) + 0.15 * fused.get(mid, 0.0)
-                            ranked_ids.append(nb["id"])
-            except Exception: pass
+                seed_scores = {mid: fused[mid] for mid in ranked_ids[:3]}
+                for mid, seed_score in seed_scores.items():
+                    for nb in self.store.memory_neighbors(mid, depth=1, limit=3, as_of=as_of):
+                        if not kinds or nb.get("kind") in kinds:
+                            by_id.setdefault(nb["id"], nb)
+                            weight = max(0.0, min(1.0, float(nb.get("link_weight", 1.0))))
+                            fused[nb["id"]] = fused.get(nb["id"], 0.0) + 0.15 * weight * seed_score
+                ranked_ids = sorted(fused, key=lambda mid: (
+                    fused[mid] + (0 if as_of else min(math.log1p(int(by_id[mid].get("reinforcement", 1))), 2.5) * 0.0005),
+                    int(by_id[mid]["importance"])), reverse=True)
+            except Exception as exc:
+                logger.warning("记忆图扩展失败: %s", type(exc).__name__)
         ranked_ids = self._apply_kind_quotas(ranked_ids, by_id, max(1, limit))
         result = []
         for memory_id in ranked_ids:
@@ -168,6 +178,7 @@ class MemoryEngine:
             item["retrieval"] = {
                 "score": round(fused[memory_id], 6),
                 "keyword_rank": self._rank(lanes["keyword"], memory_id),
+                "bm25_rank": self._rank(lanes["bm25"], memory_id),
                 "vector_rank": self._rank(lanes["vector"], memory_id),
                 "vector_similarity": round(vector_scores[memory_id], 4) if memory_id in vector_scores else None,
             }
@@ -184,6 +195,8 @@ class MemoryEngine:
         return result
 
     async def _remember(self, content: str, kind: str, importance: int, source: str, source_ref: str | None = None, *, require_source: bool = False) -> MemoryWriteResult:
+        embedder = self.embedder
+        embedding_namespace = self.store.embedding_namespace
         content = content.strip()
         if not content:
             return MemoryWriteResult("skipped", None, reason="empty content")
@@ -199,16 +212,20 @@ class MemoryEngine:
                 return MemoryWriteResult("reinforced", reinforced, item["id"], "exact match")
 
         vector: list[float] | None = None
-        if self.embedder and self.embedder.enabled:
+        if embedder and embedder.enabled:
             try:
                 await self._backfill(items, limit=128)
-                vector = await asyncio.wait_for(self.embedder.embed(content), timeout=self.embedder.timeout_seconds + 1)
+                vector = await asyncio.wait_for(embedder.embed(content), timeout=embedder.timeout_seconds + 1)
             except Exception as exc:
                 logger.warning("记忆向量去重不可用，使用文本去重: %s", type(exc).__name__)
                 vector = None
 
+        if embedding_namespace != self.store.embedding_namespace:
+            vector = None
+        status = self.store.vector_index_status
+        indexed = status["enabled"] and vector and status["dimension"] == len(vector)
         if vector and indexed:
-            indexed_candidates = [item for item, _ in self.store.vector_memory_candidates(vector, 64)]
+            indexed_candidates = [item for item, _ in self.store.vector_memory_candidates(vector, 64, namespace=embedding_namespace)]
             items = list({item["id"]: item for item in [*items, *indexed_candidates]}.values())
 
         normalized = self._normalize(content)
@@ -245,9 +262,8 @@ class MemoryEngine:
             mutable_kinds = {"preference", "profile", "goal", "procedure"}
             if target and action == "supersede" and kind in mutable_kinds and float(target["relation_similarity"]) >= 0.55:
                 reason = decision.get("reason", "")
-                saved = self.store.add_memory(content, kind, importance, source, vector, target_id, reason, source_ref, require_source=require_source)
+                saved = self.store.add_memory(content, kind, importance, source, vector, target_id, reason, source_ref, require_source=require_source, embedding_namespace=embedding_namespace)
                 try:
-                    self.store.temporal_invalidate(target_id, saved["id"])
                     organized = self.organize(content, kind)
                     with self.store.lock:
                         self.store.db.execute("UPDATE memories SET valid_at=COALESCE(valid_at,created_at), attributes_json=?, entities_json=?, provenance_json=? WHERE id=?",
@@ -255,20 +271,23 @@ class MemoryEngine:
                         self.store.db.commit()
                     self.auto_link(saved["id"], organized["entities"])
                     saved = self.store.memory(saved["id"]) or saved
-                except Exception: pass
+                except Exception as exc:
+                    logger.warning("记忆已保存，属性或关联补充失败: %s", type(exc).__name__)
                 return MemoryWriteResult("superseded", saved, target_id, reason)
 
         if not self.decider:
             for item in related:
                 full = self.store.memory(item["id"])
+                if full and full.get("source") == "user_correction" and source not in {"manual", "reviewed_conversation"}:
+                    continue
                 if full and full.get("status") == "active" and kind in {"preference", "profile", "goal", "procedure"} and self._contradicts(content, full["content"]):
-                    saved = self.store.add_memory(content, kind, importance, source, vector, item["id"], "contradiction auto-supersede", source_ref, require_source=require_source)
+                    saved = self.store.add_memory(content, kind, importance, source, vector, item["id"], "contradiction auto-supersede", source_ref, require_source=require_source, embedding_namespace=embedding_namespace)
                     try:
-                        self.store.temporal_invalidate(item["id"], saved["id"])
                         self.store.record_evolution(saved["id"], f"矛盾替代 {item['id']}: {content[:120]}")
-                    except Exception: pass
+                    except Exception as exc:
+                        logger.warning("记忆已替代，演化记录补充失败: %s", type(exc).__name__)
                     return MemoryWriteResult("superseded", saved, item["id"], "contradiction auto-supersede")
-        saved = self.store.add_memory(content, kind, importance, source, vector, source_ref=source_ref, require_source=require_source)
+        saved = self.store.add_memory(content, kind, importance, source, vector, source_ref=source_ref, require_source=require_source, embedding_namespace=embedding_namespace)
         try:
             organized = self.organize(content, kind)
             with self.store.lock:
@@ -277,7 +296,8 @@ class MemoryEngine:
                 self.store.db.commit()
             self.auto_link(saved["id"], organized["entities"])
             saved = self.store.memory(saved["id"]) or saved
-        except Exception: pass
+        except Exception as exc:
+            logger.warning("记忆已保存，属性或关联补充失败: %s", type(exc).__name__)
         return MemoryWriteResult("created", saved, reason="independent memory")
 
     def refresh_markdown(self) -> str:
@@ -286,16 +306,18 @@ class MemoryEngine:
         return self.markdown.sync_memory(self.store.memories(limit=5000))
 
     async def correct(self, memory_id: str, content: str, kind: str, importance: int, reason: str) -> dict[str, Any] | None:
+        embedder = self.embedder
+        embedding_namespace = self.store.embedding_namespace
         current = self.store.memory(memory_id)
         if not current or current["status"] != "active":
             return None
         vector = current.get("embedding") if content.strip() == current["content"] else None
-        if vector is None and self.embedder and self.embedder.enabled:
+        if vector is None and embedder and embedder.enabled:
             try:
-                vector = await asyncio.wait_for(self.embedder.embed(content), timeout=self.embedder.timeout_seconds + 1)
+                vector = await asyncio.wait_for(embedder.embed(content), timeout=embedder.timeout_seconds + 1)
             except Exception as exc:
                 logger.warning("纠正记忆向量化不可用，使用关键词检索: %s", type(exc).__name__)
-        corrected = self.store.correct_memory(memory_id, content, kind, importance, reason, vector)
+        corrected = self.store.correct_memory(memory_id, content, kind, importance, reason, vector, embedding_namespace=embedding_namespace)
         if corrected:
             self.refresh_markdown()
         return corrected
@@ -317,39 +339,54 @@ class MemoryEngine:
 
     async def reindex(self, limit: int = 1000) -> dict[str, int | bool]:
         items = self.store.memories(limit=max(1, min(limit, 5000)))
-        missing = [item for item in items if not item.get("embedding")]
+        dimension = self.store.vector_index_status["dimension"]
+        missing = [item for item in items if not item.get("embedding") or (dimension and len(item["embedding"]) != dimension)]
         if not self.embedder or not self.embedder.enabled:
             return {"enabled": False, "indexed": 0, "remaining": len(missing)}
         indexed = await self._backfill(missing, limit=len(missing))
         return {"enabled": True, "indexed": indexed, "remaining": max(0, len(missing) - indexed)}
 
     async def _backfill(self, items: list[dict], limit: int) -> int:
-        if not self.embedder or not self.embedder.enabled:
+        embedder = self.embedder
+        embedding_namespace = self.store.embedding_namespace
+        if not embedder or not embedder.enabled:
             return 0
-        missing = [item for item in items if not item.get("embedding")][:limit]
+        dimension = self.store.vector_index_status["dimension"]
+        missing = [item for item in items if not item.get("embedding") or (dimension and len(item["embedding"]) != dimension)][:limit]
         if not missing:
             return 0
         try:
-            vectors = await self.embedder.embed_batch([item["content"] for item in missing])
+            vectors = await embedder.embed_batch([item["content"] for item in missing])
         except Exception as exc:
             logger.warning("记忆向量回填失败: %s", type(exc).__name__)
             return 0
-        indexed = 0
-        for item, vector in zip(missing, vectors, strict=False):
-            if vector:
+        dimensions = {len(vector) for vector in vectors if isinstance(vector, list)}
+        if len(vectors) != len(missing) or len(dimensions) != 1 or any(
+            not isinstance(vector, list) or not vector or not any(vector) or any(
+                not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+                for value in vector) for vector in vectors
+        ):
+            logger.warning("记忆向量回填返回数量、维度或数值不合法，整批跳过")
+            return 0
+        with self.store._memory_transaction():
+            if embedding_namespace != self.store.embedding_namespace:
+                logger.warning("Embedding 模型已切换，跳过旧模型的回填批次")
+                return 0
+            for item, vector in zip(missing, vectors, strict=True):
                 self.store.set_memory_embedding(item["id"], vector)
-                item["embedding"] = vector
-                indexed += 1
-        return indexed
+            # Update caller snapshots only after the whole batch has committed.
+        for item, vector in zip(missing, vectors, strict=True):
+            item["embedding"] = vector
+        return len(missing)
 
 
     @staticmethod
-    def _bm25(query_tokens: set[str], item_tokens: set[str], doc_len: int, avg_len: float, doc_freq: dict[str, int], total_docs: int) -> float:
+    def _bm25(query_tokens: set[str], item_tokens: Counter[str], doc_len: int, avg_len: float, doc_freq: dict[str, int], total_docs: int) -> float:
         score = 0.0
-        for token in query_tokens & item_tokens:
+        for token in query_tokens & item_tokens.keys():
             df = doc_freq.get(token, 1)
             idf = max(0.0, __import__("math").log((total_docs - df + 0.5) / (df + 0.5) + 1.0))
-            tf = 1.0
+            tf = float(item_tokens[token])
             score += idf * (tf * 2.2) / (tf + 1.2 * (1 - 0.75 + 0.75 * (doc_len / max(1.0, avg_len))))
         return score
 
@@ -359,7 +396,15 @@ class MemoryEngine:
         ax, bx = a.strip().lower(), b.strip().lower()
         if MemoryEngine._similar(MemoryEngine._normalize(ax), MemoryEngine._normalize(bx)) < 0.45:
             return False
-        return any(n in ax for n in neg) != any(n in bx for n in neg)
+        if any(n in ax for n in neg) != any(n in bx for n in neg):
+            # A polarity change is safe only when the subject and object agree.
+            # "喜欢红茶" and "不喜欢绿茶" are independent preferences.
+            pattern = r"不再|不是|没有|不|没|否|\b(?:do not|don't|does not|doesn't|not|never|no longer)\s+"
+            return MemoryEngine._canonical(re.sub(pattern, "", ax)) == MemoryEngine._canonical(re.sub(pattern, "", bx))
+        number = r"(?<![a-z])[-+]?\d+(?:\.\d+)?"
+        a_values, b_values = re.findall(number, ax), re.findall(number, bx)
+        return bool(a_values and b_values and a_values != b_values
+                    and re.sub(number, "<value>", ax) == re.sub(number, "<value>", bx))
 
     @staticmethod
     def _lexical_query(query: str) -> str:
@@ -368,14 +413,18 @@ class MemoryEngine:
         return re.sub(r"(?:是)?什么(?:呢|呀|啊)?$", "", cleaned).strip()
 
     @staticmethod
-    def _tokens(text: str) -> set[str]:
+    def _token_sequence(text: str) -> list[str]:
         lowered = text.lower()
-        tokens = set(re.findall(r"[a-z0-9_]{2,}", lowered))
+        tokens = re.findall(r"[a-z0-9_]{2,}", lowered)
         for sequence in re.findall(r"[\u4e00-\u9fff]+", lowered):
-            tokens.update(sequence[index:index + 2] for index in range(max(1, len(sequence) - 1)))
-            if len(sequence) <= 4:
-                tokens.add(sequence)
-        return {token for token in tokens if token and token not in _STOP_TOKENS}
+            tokens.extend(sequence[index:index + 2] for index in range(max(1, len(sequence) - 1)))
+            if 2 < len(sequence) <= 4:
+                tokens.append(sequence)
+        return [token for token in tokens if token and token not in _STOP_TOKENS]
+
+    @staticmethod
+    def _tokens(text: str) -> set[str]:
+        return set(MemoryEngine._token_sequence(text))
 
     @classmethod
     def _lexical_score(cls, query: str, query_tokens: set[str], item: dict) -> float:

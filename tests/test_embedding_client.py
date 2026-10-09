@@ -4,9 +4,10 @@ import asyncio
 import json
 
 import httpx
+import pytest
 
 from memoria.config import ModelConfig
-from memoria.memory.embedding import EmbeddingClient
+from memoria.memory.embedding import EmbeddingClient, EmbeddingError
 
 
 def test_default_batches_preserve_all_texts_under_provider_limit(monkeypatch):
@@ -32,3 +33,13 @@ def test_default_batches_preserve_all_texts_under_provider_limit(monkeypatch):
     assert [len(batch) for batch in batches] == [10, 10, 3]
     assert [text for batch in batches for text in batch] == texts
     assert [vector[0] for vector in vectors] == list(range(23))
+
+
+@pytest.mark.parametrize("payload", [
+    {"data": [{"index": 0, "embedding": [1, 0]}, {"index": 0, "embedding": [0, 1]}]},
+    {"data": [{"index": 0, "embedding": [1, 0]}, {"index": 1, "embedding": [float("inf"), 1]}]},
+    {"data": [{"index": 0, "embedding": [1, 0]}, {"index": 1, "embedding": [0, 0]}]},
+])
+def test_invalid_provider_vectors_are_rejected(payload):
+    with pytest.raises(EmbeddingError):
+        EmbeddingClient._vectors(payload, 2)

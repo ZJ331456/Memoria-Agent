@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import hashlib
+import math
 from typing import Any
 
 import httpx
@@ -23,6 +25,12 @@ class EmbeddingClient:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max(0, max_retries)
         self.batch_size = max(1, min(batch_size, 64))
+
+    @property
+    def namespace(self) -> str:
+        # Provider endpoint and model identify the vector space. Keys are excluded.
+        identity = f"{self.config.base_url.rstrip('/')}|{self.config.model}"
+        return "embedding:" + hashlib.sha256(identity.encode()).hexdigest()
 
     @property
     def enabled(self) -> bool:
@@ -65,10 +73,14 @@ class EmbeddingClient:
     @staticmethod
     def _vectors(payload: dict[str, Any], expected: int) -> list[list[float]]:
         data = sorted(payload["data"], key=lambda item: int(item.get("index", 0)))
+        if any("index" in item for item in data) and [int(item.get("index", -1)) for item in data] != list(range(expected)):
+            raise EmbeddingError("embedding 响应序号缺失或重复")
         vectors = [[float(value) for value in item["embedding"]] for item in data]
         if len(vectors) != expected or any(not vector for vector in vectors):
             raise EmbeddingError(f"embedding 响应数量异常，期望 {expected}，实际 {len(vectors)}")
         dimension = len(vectors[0])
         if any(len(vector) != dimension for vector in vectors):
             raise EmbeddingError("embedding 响应向量维度不一致")
+        if any(not any(vector) or any(not math.isfinite(value) for value in vector) for vector in vectors):
+            raise EmbeddingError("embedding 响应包含非有限数值或零向量")
         return vectors
