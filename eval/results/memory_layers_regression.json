@@ -1,0 +1,299 @@
+{
+  "measurement_date": "2026-10-09",
+  "seed": 331456,
+  "scope": "offline local mechanism regression on synthetic fixtures; no model or network",
+  "protocol": {
+    "prediction_source": "actual local module calls against temporary SQLite and temporary SKILL.md files",
+    "expected_use": "fixed fixture expectations are used only after observations are collected",
+    "clock": "2026-01-01T00:00:00+00:00; advanced by two days for TTL checks",
+    "limitations": [
+      "not a public benchmark, model-answer-quality result, or online latency measurement",
+      "prompt budgets count Python characters, not provider tokens",
+      "personal episodes and semantic memory do not establish multi-Agent chat isolation"
+    ]
+  },
+  "limits": {
+    "episode_top_k": 3,
+    "episode_ttl_days": 1,
+    "capacity_max_active": 2,
+    "semantic_section_chars": 3000,
+    "active_skill_section_chars": 3000,
+    "assembled_frame_chars": 700,
+    "prompt_chars": 2000,
+    "protocol_prompt_chars": 3000,
+    "turn_memory_max_calls": 2,
+    "turn_memory_max_chars": 2000,
+    "turn_memory_character_case_extra_chars": 100
+  },
+  "environment": {
+    "python": "3.11.7",
+    "sqlite": "3.41.2"
+  },
+  "summary": {
+    "passed": 15,
+    "total": 15,
+    "pass_rate": 1.0
+  },
+  "checks": [
+    {
+      "name": "episode_cross_session_recall",
+      "layer": "episodic",
+      "observed": [
+        "deployment"
+      ],
+      "expected": [
+        "deployment"
+      ],
+      "pass": true
+    },
+    {
+      "name": "episode_unrelated_abstention",
+      "layer": "episodic",
+      "observed": [],
+      "expected": [],
+      "pass": true
+    },
+    {
+      "name": "episode_source_resolution",
+      "layer": "episodic",
+      "observed": {
+        "message_matches": true,
+        "session_matches": true,
+        "role": "user"
+      },
+      "expected": {
+        "message_matches": true,
+        "session_matches": true,
+        "role": "user"
+      },
+      "pass": true
+    },
+    {
+      "name": "episode_ttl_filters_search",
+      "layer": "forgetting",
+      "observed": [],
+      "expected": [],
+      "pass": true
+    },
+    {
+      "name": "episode_pin_survives_ttl",
+      "layer": "forgetting",
+      "observed": [
+        "pinned_plan"
+      ],
+      "expected": [
+        "pinned_plan"
+      ],
+      "pass": true
+    },
+    {
+      "name": "forgetting_dry_run_has_no_effect",
+      "layer": "forgetting",
+      "observed": {
+        "candidate_count": 3,
+        "archived_count": 0,
+        "state_unchanged": true,
+        "pinned_selected": false
+      },
+      "expected": {
+        "candidate_count": 3,
+        "archived_count": 0,
+        "state_unchanged": true,
+        "pinned_selected": false
+      },
+      "pass": true
+    },
+    {
+      "name": "episode_capacity_archiving",
+      "layer": "forgetting",
+      "observed": {
+        "active": [
+          "e0",
+          "e3"
+        ],
+        "archived": [
+          "e1",
+          "e2"
+        ],
+        "archived_count": 2,
+        "semantic_preserved": true
+      },
+      "expected": {
+        "active": [
+          "e0",
+          "e3"
+        ],
+        "archived": [
+          "e1",
+          "e2"
+        ],
+        "archived_count": 2,
+        "semantic_preserved": true
+      },
+      "pass": true
+    },
+    {
+      "name": "source_session_deletion_no_episode_leak",
+      "layer": "episodic",
+      "observed": {
+        "deleted": true,
+        "detail_missing": true,
+        "search_empty": true,
+        "source_delete_event": true
+      },
+      "expected": {
+        "deleted": true,
+        "detail_missing": true,
+        "search_empty": true,
+        "source_delete_event": true
+      },
+      "pass": true
+    },
+    {
+      "name": "semantic_pending_review_not_injected",
+      "layer": "semantic",
+      "observed": {
+        "review_status": "pending",
+        "retrieved_count": 0,
+        "pending_in_frame": false
+      },
+      "expected": {
+        "review_status": "pending",
+        "retrieved_count": 0,
+        "pending_in_frame": false
+      },
+      "pass": true
+    },
+    {
+      "name": "skill_revision_reload_visible",
+      "layer": "procedural",
+      "observed": {
+        "revision_changed": true,
+        "selected": [
+          "deploy"
+        ],
+        "updated_body_visible": true,
+        "revision_before": "a6304c33779dba80ffa7cff0f0db7237fa8a385ee980234a4f3083ab988e7612",
+        "revision_after": "a885ae3788ab84b099de830932bc726749ca9e34b6c62c048d2af5503e70debd"
+      },
+      "expected": {
+        "revision_changed": true,
+        "selected": [
+          "deploy"
+        ],
+        "updated_body_visible": true
+      },
+      "pass": true
+    },
+    {
+      "name": "long_semantic_does_not_evict_active_skill",
+      "layer": "working",
+      "observed": {
+        "semantic_retrieved": true,
+        "memory_id_retained": true,
+        "active_skill_retained": true,
+        "frame_chars": 700
+      },
+      "expected": {
+        "semantic_retrieved": true,
+        "memory_id_retained": true,
+        "active_skill_retained": true,
+        "frame_chars_at_most": 700
+      },
+      "pass": true
+    },
+    {
+      "name": "prompt_cap_preserves_frame_and_latest_user",
+      "layer": "working",
+      "observed": {
+        "final_chars": 1782,
+        "frame_retained": true,
+        "active_skill_retained": true,
+        "latest_user_tail_retained": true,
+        "raw_user_unchanged": true
+      },
+      "expected": {
+        "final_chars_at_most": 2000,
+        "frame_retained": true,
+        "active_skill_retained": true,
+        "latest_user_tail_retained": true,
+        "raw_user_unchanged": true
+      },
+      "pass": true
+    },
+    {
+      "name": "prompt_tool_protocol_complete",
+      "layer": "working",
+      "observed": {
+        "call_ids": [
+          "call-a",
+          "call-b"
+        ],
+        "tool_ids": [
+          "call-a",
+          "call-b"
+        ],
+        "orphan_absent": true,
+        "final_chars": 1724
+      },
+      "expected": {
+        "call_ids": [
+          "call-a",
+          "call-b"
+        ],
+        "tool_ids": [
+          "call-a",
+          "call-b"
+        ],
+        "orphan_absent": true,
+        "final_chars_at_most": 3000
+      },
+      "pass": true
+    },
+    {
+      "name": "turn_memory_call_cap_includes_initial_frame",
+      "layer": "working",
+      "observed": {
+        "allowed": [
+          true,
+          true,
+          false
+        ],
+        "calls": 2,
+        "blocked_calls": 1,
+        "initial_frame_accounted": true
+      },
+      "expected": {
+        "allowed": [
+          true,
+          true,
+          false
+        ],
+        "calls": 2,
+        "blocked_calls": 1,
+        "initial_frame_accounted": true
+      },
+      "pass": true
+    },
+    {
+      "name": "turn_memory_character_cap_includes_initial_frame",
+      "layer": "working",
+      "observed": {
+        "initial_frame_chars": 700,
+        "first_allowed": true,
+        "emitted_chars": 100,
+        "second_allowed": false,
+        "used_chars": 800,
+        "max_chars": 800
+      },
+      "expected": {
+        "first_allowed": true,
+        "emitted_chars": 100,
+        "second_allowed": false,
+        "used_equals_max": true
+      },
+      "pass": true
+    }
+  ],
+  "implementation_commit": "62329d5268629cd92a8846c0eb8bd7c1173b723c"
+}
