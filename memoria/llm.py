@@ -31,6 +31,7 @@ class ChatResult:
     usage: dict[str, int] = field(default_factory=dict)
     duration_ms: int = 0
     retries: int = 0
+    finish_reason: str | None = None
 
 
 class LLMClient:
@@ -62,7 +63,7 @@ class LLMClient:
             except json.JSONDecodeError: arguments = {}
             calls.append({"id": call.get("id", ""), "name": fn.get("name", ""), "arguments": arguments})
         usage = {key:int(value) for key,value in (data.get("usage") or {}).items() if isinstance(value, int)}
-        return ChatResult(str(message.get("content") or message.get("reasoning_content") or ""), calls, message, usage, metrics["duration_ms"], metrics["retries"])
+        return ChatResult(str(message.get("content") or message.get("reasoning_content") or ""), calls, message, usage, metrics["duration_ms"], metrics["retries"], data["choices"][0].get("finish_reason"))
 
     async def _post(self, selected: ModelConfig, headers: dict[str, str], payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
         last_error: Exception | None = None
