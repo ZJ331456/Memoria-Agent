@@ -2,7 +2,7 @@
 
 [项目首页](../README.md) · [后端测试](../tests/README.md) · [个人记忆模块](../memoria/memory/README.md) · [归档报告](results/README.md)
 
-本目录将个人记忆检索、共享记忆治理和存储层性能分别评估。以下命令在仓库根目录运行，要求已安装 `requirements.txt`；需要虚拟环境时将 `python` 替换为 `.venv/bin/python`。默认本地 Runner 使用临时 SQLite，不写入运行中的个人数据库，也不调用模型；`--embedding` 是显式的联网分支。
+本目录将个人记忆检索、共享记忆治理和存储层性能分别评估。以下命令在仓库根目录运行，要求已安装 `requirements.txt`；需要虚拟环境时将 `python` 替换为 `.venv/bin/python`。默认本地 Runner 使用临时 SQLite，不写入运行中的个人数据库，也不调用模型；`--embedding`、LongMemEval 的 `--qa/--judge` 是显式的联网分支。
 
 ## 文件导航
 
@@ -12,6 +12,7 @@
 | [run_seeded.py](run_seeded.py) / [seeded_memory_cases.json](seeded_memory_cases.json) | 初始化八条个人记忆，通过查询规划与真实引擎运行十二个中文问题 |
 | [governance_eval.py](governance_eval.py) / [governance_cases.json](governance_cases.json) | 二十四条治理案例的评分器、答案模板与指标门槛 |
 | [run_governance.py](run_governance.py) | 在真实治理层构造案例、生成实际预测并评分 |
+| [longmemeval.py](longmemeval.py) / [run_longmemeval.py](run_longmemeval.py) | 公开 LongMemEval 历史适配、来源召回、API 问答与独立判分 |
 | [run_memory_layers.py](run_memory_layers.py) | 离线执行真实情景/语义/技能/预算模块，生成十五项分层机制检查 |
 | [benchmark_shared_memory.py](benchmark_shared_memory.py) | 共享存储层的容量、授权检索、详情与越权拒绝测量 |
 | [test_governance_eval.py](test_governance_eval.py) | 评分器与真实 Runner 的回归用例 |
@@ -39,6 +40,24 @@ python -m eval.run_seeded --embedding --min-recall 0.85
 检索分数的 Recall、Precision、MRR 对有预期记忆的案例求均值；`wrong_injection_rate` 表示无关/负样本被注入记忆的比例，`forbidden_hit_rate` 在声明禁用 ID 的案例中统计前 K 命中。`gating_accuracy` 同时检查正样本命中和负样本为空。`run_seeded` 的输出包含 `report` 与 `predictions`，独立 `memory_eval` 需要的是其中的预测映射，不是整个 Runner 输出文件。
 
 较大记忆库中的词面召回边界由 `tests/test_memory_retrieval_scale.py` 覆盖：220 条高重要性干扰记录下，低重要性的较早记忆仍能通过问题片段被召回。运行 `python -m pytest -q tests/test_memory_retrieval_scale.py`。该场景不调用模型，适合在调整 FTS 查询或候选上限时做确定性回归。
+
+## LongMemEval 公开数据评测
+
+默认使用 `data/benchmark/longmemeval_s_cleaned_subset5.json`，完整文件可用 `--data` 显式选择。每题的所有用户/助手历史按轮次分块，在独立临时数据库中调用真实 `MemoryEngine`、`PromptAssembler` 和 `ContextBudget`；参考答案与来源标签只用于评分，带 `answer_` 的会话 ID 不送入系统。
+
+```bash
+# 无 API 的关键词检索
+python -m eval.run_longmemeval
+# 调用 main 回答与 fast 评分；不调用 Embedding
+python -m eval.run_longmemeval --qa --judge
+# 调用 Embedding、main 和 fast；历史向量在 data/ 下缓存
+python -m eval.run_longmemeval --embedding --qa --judge \
+  --out data/benchmark/results/longmemeval_subset5_hybrid_qa.json
+```
+
+报告区分检索来源、最终注入来源和问答正确率，并记录 API usage、完成状态与失败。截断或仅有推理文本的响应不能作为正式答案评分。`--qa` 输出官方格式 `.hypotheses.jsonl`，便于另行执行官方评分。
+
+这是公开样本上的原始历史 RAG 评测；并未覆盖生产抽取、审批、情景和共享权限全链路。内置判分采用独立量规与项目配置模型，不是官方 GPT-4o 判分。5 题结果不能称为完整公开集成绩。运行参数、指标口径、API 调用与本次实测见[中文说明](../docs/LongMemEval评测说明.md)和[报告](results/longmemeval_subset5.json)。
 
 ## 分层记忆机制回归
 

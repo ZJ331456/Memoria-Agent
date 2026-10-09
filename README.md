@@ -135,7 +135,18 @@ npm run test:e2e --prefix frontend
 
 分层评测执行真实本地模块，检查情景来源/过期/固定、待审过滤、技能指纹、上下文和整轮读取预算；不调用模型，不测真实问答质量。
 
-公开数据可优先选择 [GateMem](https://github.com/rzhub/GateMem) 评估共享记忆的授权和遗忘，再用 [LongMemEval](https://github.com/xiaowu0162/LongMemEval) 的固定小样本评估知识更新与拒答，或用 [LoCoMo](https://github.com/snap-research/locomo) 的证据 ID 评估跨会话来源召回。本仓库尚未发布这些公开集的正式成绩。
+已接入 [LongMemEval](https://github.com/xiaowu0162/LongMemEval) 真实历史数据，支持离线检索、Embedding 混合检索、LLM 问答和独立评分：
+
+```bash
+# 默认读取 data/benchmark/longmemeval_s_cleaned_subset5.json；无 API
+.venv/bin/python -m eval.run_longmemeval
+# 使用已配置的 Embedding、main 回答模型和 fast 评分模型
+.venv/bin/python -m eval.run_longmemeval --embedding --qa --judge
+```
+
+2026-10-09 的[5 题实测](eval/results/longmemeval_subset5.json)中，关键词/混合检索的标注轮次召回率为 **90%/100%**；两种方案均回答对 4 道事实、时间与更新题。偏好题的自动判分存在争议，报告保留原始回答与疑似误判说明。这是原始历史 RAG 子集评测，未重放人工审核和共享 ACL，也不是完整 500 题的官方成绩。API 需求、缓存和指标说明见[评测入口](eval/README.md)。
+
+共享授权与遗忘可继续接入 [GateMem](https://github.com/rzhub/GateMem)；跨会话来源召回可参考 [LoCoMo](https://github.com/snap-research/locomo) 的证据 ID。
 
 ## Related Projects
 

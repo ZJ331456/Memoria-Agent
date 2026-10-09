@@ -31,6 +31,8 @@ python -m pytest -q
 | [test_layer_settings_config.py](test_layer_settings_config.py) | 分层配置继承、严格字段类型和完整技能文件的版本指纹 |
 | [test_review_source_transactions.py](test_review_source_transactions.py) | 来源失效时拒绝创建/替代/强化，跨连接删除竞态与外层事务回滚 |
 | [test_memory_layers_eval.py](test_memory_layers_eval.py) | 离线真实模块评估结果，以及故障注入后 Runner 的失败退出码 |
+| [test_embedding_client.py](test_embedding_client.py) | 供应商十条批量限制、完整覆盖和向量排序 |
+| [test_longmemeval.py](test_longmemeval.py) | 标签隔离、逐题数据库隔离、来源指标、向量缓存、失败分母与正式回答校验 |
 | [test_governance_core.py](test_governance_core.py) | Agent 密钥、空间 ACL、冲突比较、生命周期、来源校验、密钥恢复、失权提案及跨连接并发审批 |
 | [test_governance_api.py](test_governance_api.py) | 管理员与 Agent key 认证边界、共享审核/撤销/版本以及旧库导入 |
 | [test_store_transactions.py](test_store_transactions.py) | 个人记忆元数据写入不得提前提交共享连接上的治理事务；创建与替代两个分支 |

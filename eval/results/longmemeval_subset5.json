@@ -1,0 +1,2825 @@
+{
+  "measurement_date": "2026-10-09",
+  "implementation_commit": "4af0dd791d119f8b7742a47285bcbacc47183a5b",
+  "scope": "User-selected LongMemEval 5-case raw-history RAG; configured custom judge, not official full-dataset score",
+  "subset_exact_match_verified": true,
+  "commands": [
+    "python -m eval.run_longmemeval --out data/benchmark/results/longmemeval_subset5_lexical.json",
+    "python -m eval.run_longmemeval --qa --judge --out data/benchmark/results/longmemeval_subset5_lexical_qa.json",
+    "python -m eval.run_longmemeval --embedding --qa --judge --out data/benchmark/results/longmemeval_subset5_hybrid_qa.json"
+  ],
+  "experiment_notes": [
+    "Final QA comparison uses identical max_output_tokens=4096, top_k_chunks=10, chunk_chars=1600 and context_chars=12000. No gold-directed retriever/prompt optimization was performed.",
+    "Hybrid final run reused all five complete history vector caches; initial uncached index accounting appears separately. Timings therefore do not compare cold-start performance.",
+    "Initial embedding run failed on all five cases because default batch size 16 exceeded provider limit 10; recorded locally and fixed before final runs.",
+    "Initial 1200-token hybrid attempt returned incomplete reasoning instead of final content for the preference question; its nominal judge score was excluded. Final runs enforce final content and stop finish reason.",
+    "Initial lexical 1200-token attempt was graded 4/5, while the final 4096-token run was graded 5/5. The preference answer in the final run still declines to give advice, yet the custom judge accepts it; this is a suspected false positive requiring independent/official regrading.",
+    "Preference grading is disputed: final hybrid answer includes yogurt tips but judge rejects its personalization. Retain raw final answers and judgments instead of treating model grades as established correctness.",
+    "All other four final answers in each mode explicitly match the factual reference points; this manual inspection is not official grading.",
+    "Subset lacks multi-session, single-session-assistant and abstention coverage; no production governance, human approval or shared ACL replay.",
+    "Only safe metadata and final answers are archived; no raw history, credentials, database or embedding vectors."
+  ],
+  "initial_uncached_embedding_index_and_queries": {
+    "logical_batches": 326,
+    "texts": 3190,
+    "input_chars": 2668204,
+    "failed_batches": 0
+  },
+  "runs": {
+    "lexical": {
+      "measurement_date": "2026-10-09",
+      "dataset": {
+        "file": "longmemeval_s_cleaned_subset5.json",
+        "sha256": "9e8236f95547af45715de2a1e2bda77e2290c24dcb858654fbc5246ac2e5427e",
+        "cases": 5,
+        "question_ids": [
+          "gpt4_4edbafa2",
+          "1faac195",
+          "c960da58",
+          "031748ae",
+          "caf03d32"
+        ],
+        "source": "https://github.com/xiaowu0162/LongMemEval"
+      },
+      "protocol": {
+        "adapter": "memoria-raw-history-rag-v1",
+        "retriever": "lexical",
+        "reader": null,
+        "judge": null,
+        "judge_rubric": "independently phrased LongMemEval type criteria; not official GPT-4o grading",
+        "top_k_chunks": 10,
+        "chunk_chars": 1600,
+        "context_chars": 12000,
+        "context_char_budget": 60000,
+        "max_output_tokens": 1200,
+        "concurrency": 2,
+        "assistant_history_included": true,
+        "gold_fields_used_only_for_scoring": [
+          "answer",
+          "answer_session_ids",
+          "has_answer",
+          "question_type"
+        ],
+        "source_ids_exposed_to_system": "opaque positional IDs, not answer-prefixed benchmark IDs",
+        "limitations": [
+          "raw-history index -> actual MemoryEngine -> PromptAssembler/ContextBudget -> optional LLM reader",
+          "does not replay production extraction, human review, skills, episodes, or shared ACL",
+          "chunk-level retrieval and bounded source metrics are not the official session-granularity ranking protocol",
+          "small selected subset; not a 500-question official score",
+          "character limits are not exact token limits"
+        ]
+      },
+      "models": {},
+      "environment": {
+        "python": "3.11.7",
+        "sqlite": "3.41.2"
+      },
+      "elapsed_ms": 15918.887,
+      "metrics": {
+        "overall": {
+          "cases": 5,
+          "errors": 0,
+          "retrieved_session": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 1.0,
+            "evidence_recall_all_requested": 1.0,
+            "all_evidence_found_rate": 1.0,
+            "mrr": 1.0
+          },
+          "retrieved_turn": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 0.9,
+            "evidence_recall_all_requested": 0.9,
+            "all_evidence_found_rate": 0.8,
+            "mrr": 0.9
+          },
+          "injected_session": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 1.0,
+            "evidence_recall_all_requested": 1.0,
+            "all_evidence_found_rate": 1.0,
+            "mrr": 1.0
+          },
+          "injected_turn": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 0.9,
+            "evidence_recall_all_requested": 0.9,
+            "all_evidence_found_rate": 0.8,
+            "mrr": 0.9
+          },
+          "qa_judged_cases": 0,
+          "qa_correct": 0,
+          "qa_accuracy": null,
+          "qa_accuracy_all_requested": null
+        },
+        "by_question_type": {
+          "knowledge-update": {
+            "cases": 1,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 0.5
+            },
+            "injected_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 0.5
+            },
+            "qa_judged_cases": 0,
+            "qa_correct": 0,
+            "qa_accuracy": null,
+            "qa_accuracy_all_requested": null
+          },
+          "single-session-preference": {
+            "cases": 1,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 0.5,
+              "evidence_recall_all_requested": 0.5,
+              "all_evidence_found_rate": 0.0,
+              "mrr": 1.0
+            },
+            "injected_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 0.5,
+              "evidence_recall_all_requested": 0.5,
+              "all_evidence_found_rate": 0.0,
+              "mrr": 1.0
+            },
+            "qa_judged_cases": 0,
+            "qa_correct": 0,
+            "qa_accuracy": null,
+            "qa_accuracy_all_requested": null
+          },
+          "single-session-user": {
+            "cases": 2,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_session": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "qa_judged_cases": 0,
+            "qa_correct": 0,
+            "qa_accuracy": null,
+            "qa_accuracy_all_requested": null
+          },
+          "temporal-reasoning": {
+            "cases": 1,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "qa_judged_cases": 0,
+            "qa_correct": 0,
+            "qa_accuracy": null,
+            "qa_accuracy_all_requested": null
+          }
+        }
+      },
+      "results": [
+        {
+          "question_id": "gpt4_4edbafa2",
+          "question_type": "temporal-reasoning",
+          "question": "What was the date on which I attended the first BBQ event in June?",
+          "reference_answer": "June 3rd",
+          "question_date": "2023/07/01 (Sat) 02:36",
+          "history_sessions": 41,
+          "indexed_chunks": 621,
+          "duplicate_session_ids": 0,
+          "hypothesis": null,
+          "judgment": null,
+          "index_ms": 3025.963,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 108.576,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0032:T0000:P000",
+            "S0034:T0000:P000",
+            "S0034:T0006:P000",
+            "S0040:T0000:P000",
+            "S0040:T0010:P000",
+            "S0011:T0008:P000",
+            "S0034:T0002:P000",
+            "S0034:T0008:P000",
+            "S0040:T0008:P000",
+            "S0014:T0004:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_0a00c163_1",
+            "22be78fc_2",
+            "answer_0a00c163_2",
+            "18c0af9c",
+            "2ba7fdd0_2"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0032:T0000:P000",
+            "S0034:T0000:P000",
+            "S0034:T0006:P000",
+            "S0040:T0000:P000",
+            "S0040:T0010:P000",
+            "S0011:T0008:P000",
+            "S0034:T0002:P000",
+            "S0034:T0008:P000",
+            "S0040:T0008:P000",
+            "S0014:T0004:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 4773,
+            "prompt_chars": 5467,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 4577,
+                "used_chars": 4577,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 3324.264,
+          "judge_requested": false,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          }
+        },
+        {
+          "question_id": "1faac195",
+          "question_type": "single-session-user",
+          "question": "Where does my sister Emily live?",
+          "reference_answer": "Denver",
+          "question_date": "2023/05/30 (Tue) 19:50",
+          "history_sessions": 45,
+          "indexed_chunks": 633,
+          "duplicate_session_ids": 0,
+          "hypothesis": null,
+          "judgment": null,
+          "index_ms": 2810.374,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 136.225,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 6
+          },
+          "retrieved_source_ids": [
+            "S0003:T0002:P000",
+            "S0041:T0002:P000",
+            "S0043:T0002:P000",
+            "S0043:T0006:P000",
+            "S0034:T0007:P001",
+            "S0043:T0005:P000",
+            "S0011:T0008:P000",
+            "S0003:T0003:P001",
+            "S0034:T0008:P000",
+            "S0019:T0002:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_d01949bf",
+            "8064b6ca",
+            "d2905eb6_2",
+            "9d3d54f7",
+            "ultrachat_403684",
+            "2def525b_2"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 6
+          },
+          "injected_source_ids": [
+            "S0003:T0002:P000",
+            "S0041:T0002:P000",
+            "S0043:T0002:P000",
+            "S0043:T0006:P000",
+            "S0034:T0007:P001",
+            "S0043:T0005:P000",
+            "S0011:T0008:P000",
+            "S0003:T0003:P001",
+            "S0034:T0008:P000",
+            "S0019:T0002:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 6387,
+            "prompt_chars": 7047,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 6191,
+                "used_chars": 6191,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 3144.985,
+          "judge_requested": false,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          }
+        },
+        {
+          "question_id": "c960da58",
+          "question_type": "single-session-user",
+          "question": "How many playlists do I have on Spotify?",
+          "reference_answer": "20",
+          "question_date": "2023/05/30 (Tue) 18:45",
+          "history_sessions": 46,
+          "indexed_chunks": 649,
+          "duplicate_session_ids": 0,
+          "hypothesis": null,
+          "judgment": null,
+          "index_ms": 2798.88,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 99.607,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0004:T0002:P000",
+            "S0004:T0006:P000",
+            "S0024:T0002:P000",
+            "S0015:T0002:P000",
+            "S0033:T0010:P000",
+            "S0015:T0012:P000",
+            "S0033:T0004:P000",
+            "S0033:T0002:P000",
+            "S0033:T0000:P000",
+            "S0027:T0006:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_e05e4612",
+            "412fdcf4_1",
+            "ultrachat_418604",
+            "705b5399_3",
+            "e32f5666_2"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0004:T0002:P000",
+            "S0004:T0006:P000",
+            "S0024:T0002:P000",
+            "S0015:T0002:P000",
+            "S0033:T0010:P000",
+            "S0015:T0012:P000",
+            "S0033:T0004:P000",
+            "S0033:T0002:P000",
+            "S0033:T0000:P000",
+            "S0027:T0006:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 4193,
+            "prompt_chars": 4861,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 3997,
+                "used_chars": 3997,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 3057.373,
+          "judge_requested": false,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          }
+        },
+        {
+          "question_id": "031748ae",
+          "question_type": "knowledge-update",
+          "question": "How many engineers do I lead when I just started my new role as Senior Software Engineer? How many engineers do I lead now?",
+          "reference_answer": "When you just started your new role as Senior Software Engineer, you led 4 engineers. Now, you lead 5 engineers",
+          "question_date": "2023/11/10 (Fri) 04:20",
+          "history_sessions": 46,
+          "indexed_chunks": 640,
+          "duplicate_session_ids": 0,
+          "hypothesis": null,
+          "judgment": null,
+          "index_ms": 2854.846,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 120.634,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 0.5
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0000:T0008:P000",
+            "S0000:T0010:P000",
+            "S0006:T0002:P000",
+            "S0000:T0009:P000",
+            "S0006:T0007:P000",
+            "S0006:T0003:P000",
+            "S0032:T0003:P000",
+            "S0019:T0004:P000",
+            "S0032:T0001:P000",
+            "S0004:T0010:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_8748f791_1",
+            "answer_8748f791_2",
+            "sharegpt_xjZo5Ac_0",
+            "31702c20_3",
+            "5ac7f9c5_3"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 0.5
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0000:T0008:P000",
+            "S0000:T0010:P000",
+            "S0006:T0002:P000",
+            "S0000:T0009:P000",
+            "S0006:T0007:P000",
+            "S0006:T0003:P000",
+            "S0032:T0003:P000",
+            "S0019:T0004:P000",
+            "S0032:T0001:P000",
+            "S0004:T0010:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 8550,
+            "prompt_chars": 9301,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 8354,
+                "used_chars": 8354,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 3112.121,
+          "judge_requested": false,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          }
+        },
+        {
+          "question_id": "caf03d32",
+          "question_type": "single-session-preference",
+          "question": "I've been struggling with my slow cooker recipes. Any advice on getting better results?",
+          "reference_answer": "The user would prefer responses that provide tips and advice specifically tailored to their slow cooker experiences, utilizing their recent success with beef stew and interest in making yogurt in the slow cooker. They might not prefer general slow cooker recipes or advice unrelated to their specific experiences and interests.",
+          "question_date": "2023/05/30 (Tue) 23:44",
+          "history_sessions": 51,
+          "indexed_chunks": 642,
+          "duplicate_session_ids": 1,
+          "hypothesis": null,
+          "judgment": null,
+          "index_ms": 2871.016,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 120.555,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 1,
+              "recall": 0.5,
+              "all_found": false,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0050:T0000:P000",
+            "S0050:T0006:P000",
+            "S0014:T0010:P000",
+            "S0050:T0001:P000",
+            "S0014:T0002:P000",
+            "S0048:T0002:P000",
+            "S0047:T0004:P000",
+            "S0038:T0008:P000",
+            "S0048:T0004:P000",
+            "S0047:T0006:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_2fc6aabb",
+            "a52e072b",
+            "ec806228",
+            "eb0d8dc1_6",
+            "4b1af06f_1"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 1,
+              "recall": 0.5,
+              "all_found": false,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0050:T0000:P000",
+            "S0050:T0006:P000",
+            "S0014:T0010:P000",
+            "S0050:T0001:P000",
+            "S0014:T0002:P000",
+            "S0048:T0002:P000",
+            "S0047:T0004:P000",
+            "S0038:T0008:P000",
+            "S0048:T0004:P000",
+            "S0047:T0006:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 5421,
+            "prompt_chars": 6136,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 5225,
+                "used_chars": 5225,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 3135.388,
+          "judge_requested": false,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          }
+        }
+      ],
+      "totals": {
+        "embedding": {
+          "logical_batches": 0,
+          "texts": 0,
+          "input_chars": 0,
+          "failed_batches": 0
+        },
+        "llm": {
+          "reader": {
+            "calls": 0,
+            "usage": {
+              "prompt_tokens": 0,
+              "completion_tokens": 0,
+              "total_tokens": 0
+            }
+          },
+          "judge": {
+            "calls": 0,
+            "usage": {
+              "prompt_tokens": 0,
+              "completion_tokens": 0,
+              "total_tokens": 0
+            }
+          }
+        }
+      }
+    },
+    "lexical_qa": {
+      "measurement_date": "2026-10-09",
+      "dataset": {
+        "file": "longmemeval_s_cleaned_subset5.json",
+        "sha256": "9e8236f95547af45715de2a1e2bda77e2290c24dcb858654fbc5246ac2e5427e",
+        "cases": 5,
+        "question_ids": [
+          "gpt4_4edbafa2",
+          "1faac195",
+          "c960da58",
+          "031748ae",
+          "caf03d32"
+        ],
+        "source": "https://github.com/xiaowu0162/LongMemEval"
+      },
+      "protocol": {
+        "adapter": "memoria-raw-history-rag-v1",
+        "retriever": "lexical",
+        "reader": "main",
+        "judge": "fast",
+        "judge_rubric": "independently phrased LongMemEval type criteria; not official GPT-4o grading",
+        "top_k_chunks": 10,
+        "chunk_chars": 1600,
+        "context_chars": 12000,
+        "context_char_budget": 60000,
+        "max_output_tokens": 4096,
+        "concurrency": 2,
+        "assistant_history_included": true,
+        "gold_fields_used_only_for_scoring": [
+          "answer",
+          "answer_session_ids",
+          "has_answer",
+          "question_type"
+        ],
+        "source_ids_exposed_to_system": "opaque positional IDs, not answer-prefixed benchmark IDs",
+        "limitations": [
+          "raw-history index -> actual MemoryEngine -> PromptAssembler/ContextBudget -> optional LLM reader",
+          "does not replay production extraction, human review, skills, episodes, or shared ACL",
+          "chunk-level retrieval and bounded source metrics are not the official session-granularity ranking protocol",
+          "small selected subset; not a 500-question official score",
+          "character limits are not exact token limits"
+        ]
+      },
+      "models": {
+        "main": {
+          "model": "deepseek-v4-flash",
+          "base_url": "https://api.deepseek.com/v1"
+        },
+        "fast": {
+          "model": "qwen3.6-flash",
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        }
+      },
+      "environment": {
+        "python": "3.11.7",
+        "sqlite": "3.41.2"
+      },
+      "elapsed_ms": 45834.463,
+      "metrics": {
+        "overall": {
+          "cases": 5,
+          "errors": 0,
+          "retrieved_session": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 1.0,
+            "evidence_recall_all_requested": 1.0,
+            "all_evidence_found_rate": 1.0,
+            "mrr": 1.0
+          },
+          "retrieved_turn": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 0.9,
+            "evidence_recall_all_requested": 0.9,
+            "all_evidence_found_rate": 0.8,
+            "mrr": 0.9
+          },
+          "injected_session": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 1.0,
+            "evidence_recall_all_requested": 1.0,
+            "all_evidence_found_rate": 1.0,
+            "mrr": 1.0
+          },
+          "injected_turn": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 0.9,
+            "evidence_recall_all_requested": 0.9,
+            "all_evidence_found_rate": 0.8,
+            "mrr": 0.9
+          },
+          "qa_judged_cases": 5,
+          "qa_correct": 5,
+          "qa_accuracy": 1.0,
+          "qa_accuracy_all_requested": 1.0
+        },
+        "by_question_type": {
+          "knowledge-update": {
+            "cases": 1,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 0.5
+            },
+            "injected_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 0.5
+            },
+            "qa_judged_cases": 1,
+            "qa_correct": 1,
+            "qa_accuracy": 1.0,
+            "qa_accuracy_all_requested": 1.0
+          },
+          "single-session-preference": {
+            "cases": 1,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 0.5,
+              "evidence_recall_all_requested": 0.5,
+              "all_evidence_found_rate": 0.0,
+              "mrr": 1.0
+            },
+            "injected_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 0.5,
+              "evidence_recall_all_requested": 0.5,
+              "all_evidence_found_rate": 0.0,
+              "mrr": 1.0
+            },
+            "qa_judged_cases": 1,
+            "qa_correct": 1,
+            "qa_accuracy": 1.0,
+            "qa_accuracy_all_requested": 1.0
+          },
+          "single-session-user": {
+            "cases": 2,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_session": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "qa_judged_cases": 2,
+            "qa_correct": 2,
+            "qa_accuracy": 1.0,
+            "qa_accuracy_all_requested": 1.0
+          },
+          "temporal-reasoning": {
+            "cases": 1,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "qa_judged_cases": 1,
+            "qa_correct": 1,
+            "qa_accuracy": 1.0,
+            "qa_accuracy_all_requested": 1.0
+          }
+        }
+      },
+      "results": [
+        {
+          "question_id": "gpt4_4edbafa2",
+          "question_type": "temporal-reasoning",
+          "question": "What was the date on which I attended the first BBQ event in June?",
+          "reference_answer": "June 3rd",
+          "question_date": "2023/07/01 (Sat) 02:36",
+          "history_sessions": 41,
+          "indexed_chunks": 621,
+          "duplicate_session_ids": 0,
+          "hypothesis": "Based on the supplied history, the first BBQ event you attended in June was on **June 3rd**, at your colleague’s backyard BBQ party.  \nSource: `[152afccd357b444a885df707e46f530e]`",
+          "judgment": {
+            "correct": true,
+            "reason": "模型回答明确指出日期为June 3rd，与参考答案完全一致，包含了回答问题所需的核心信息。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 3130.693,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 154.577,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0032:T0000:P000",
+            "S0034:T0000:P000",
+            "S0034:T0006:P000",
+            "S0040:T0000:P000",
+            "S0040:T0010:P000",
+            "S0011:T0008:P000",
+            "S0034:T0002:P000",
+            "S0034:T0008:P000",
+            "S0040:T0008:P000",
+            "S0014:T0004:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_0a00c163_1",
+            "22be78fc_2",
+            "answer_0a00c163_2",
+            "18c0af9c",
+            "2ba7fdd0_2"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0032:T0000:P000",
+            "S0034:T0000:P000",
+            "S0034:T0006:P000",
+            "S0040:T0000:P000",
+            "S0040:T0010:P000",
+            "S0011:T0008:P000",
+            "S0034:T0002:P000",
+            "S0034:T0008:P000",
+            "S0040:T0008:P000",
+            "S0014:T0004:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 4773,
+            "prompt_chars": 5467,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 4577,
+                "used_chars": 4577,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 1528,
+              "completion_tokens": 805,
+              "total_tokens": 2333,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 1528
+            },
+            "duration_ms": 7707,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 189,
+              "completion_tokens": 942,
+              "total_tokens": 1131
+            },
+            "duration_ms": 6412,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 17599.718
+        },
+        {
+          "question_id": "1faac195",
+          "question_type": "single-session-user",
+          "question": "Where does my sister Emily live?",
+          "reference_answer": "Denver",
+          "question_date": "2023/05/30 (Tue) 19:50",
+          "history_sessions": 45,
+          "indexed_chunks": 633,
+          "duplicate_session_ids": 0,
+          "hypothesis": "Your sister Emily lives in Denver (source: S0003:T0002:P000).",
+          "judgment": {
+            "correct": true,
+            "reason": "模型回答明确指出了Denver，完整包含参考答案的必要信息，语义一致。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 3129.577,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 89.252,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 6
+          },
+          "retrieved_source_ids": [
+            "S0003:T0002:P000",
+            "S0041:T0002:P000",
+            "S0043:T0002:P000",
+            "S0043:T0006:P000",
+            "S0034:T0007:P001",
+            "S0043:T0005:P000",
+            "S0011:T0008:P000",
+            "S0003:T0003:P001",
+            "S0034:T0008:P000",
+            "S0019:T0002:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_d01949bf",
+            "8064b6ca",
+            "d2905eb6_2",
+            "9d3d54f7",
+            "ultrachat_403684",
+            "2def525b_2"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 6
+          },
+          "injected_source_ids": [
+            "S0003:T0002:P000",
+            "S0041:T0002:P000",
+            "S0043:T0002:P000",
+            "S0043:T0006:P000",
+            "S0034:T0007:P001",
+            "S0043:T0005:P000",
+            "S0011:T0008:P000",
+            "S0003:T0003:P001",
+            "S0034:T0008:P000",
+            "S0019:T0002:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 6387,
+            "prompt_chars": 7047,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 6191,
+                "used_chars": 6191,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 1918,
+              "completion_tokens": 161,
+              "total_tokens": 2079,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 1918
+            },
+            "duration_ms": 1376,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 119,
+              "completion_tokens": 503,
+              "total_tokens": 622
+            },
+            "duration_ms": 4225,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 9014.199
+        },
+        {
+          "question_id": "c960da58",
+          "question_type": "single-session-user",
+          "question": "How many playlists do I have on Spotify?",
+          "reference_answer": "20",
+          "question_date": "2023/05/30 (Tue) 18:45",
+          "history_sessions": 46,
+          "indexed_chunks": 649,
+          "duplicate_session_ids": 0,
+          "hypothesis": "You have **20 playlists on Spotify**, based on what you mentioned on 2023/05/20. (Source: `e3d56308d24a442c8ec7f2473e6f153d`)",
+          "judgment": {
+            "correct": true,
+            "reason": "模型回答明确给出了数量20，与参考答案核心信息一致。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 2434.892,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 94.412,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0004:T0002:P000",
+            "S0004:T0006:P000",
+            "S0024:T0002:P000",
+            "S0015:T0002:P000",
+            "S0033:T0010:P000",
+            "S0015:T0012:P000",
+            "S0033:T0004:P000",
+            "S0033:T0002:P000",
+            "S0033:T0000:P000",
+            "S0027:T0006:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_e05e4612",
+            "412fdcf4_1",
+            "ultrachat_418604",
+            "705b5399_3",
+            "e32f5666_2"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0004:T0002:P000",
+            "S0004:T0006:P000",
+            "S0024:T0002:P000",
+            "S0015:T0002:P000",
+            "S0033:T0010:P000",
+            "S0015:T0012:P000",
+            "S0033:T0004:P000",
+            "S0033:T0002:P000",
+            "S0033:T0000:P000",
+            "S0027:T0006:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 4193,
+            "prompt_chars": 4861,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 3997,
+                "used_chars": 3997,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 1383,
+              "completion_tokens": 189,
+              "total_tokens": 1572,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 1383
+            },
+            "duration_ms": 1470,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 161,
+              "completion_tokens": 866,
+              "total_tokens": 1027
+            },
+            "duration_ms": 6747,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 10885.322
+        },
+        {
+          "question_id": "031748ae",
+          "question_type": "knowledge-update",
+          "question": "How many engineers do I lead when I just started my new role as Senior Software Engineer? How many engineers do I lead now?",
+          "reference_answer": "When you just started your new role as Senior Software Engineer, you led 4 engineers. Now, you lead 5 engineers",
+          "question_date": "2023/11/10 (Fri) 04:20",
+          "history_sessions": 46,
+          "indexed_chunks": 640,
+          "duplicate_session_ids": 0,
+          "hypothesis": "When you **just started** as Senior Software Engineer, you stated you led **4 engineers** — you clarified this on 2023/05/11 [dce7fc65f96945c8a08975a524291aa4].\n\n**Now / later**, as of 2023/10/24, you said you lead a team of **five engineers** [91d836d1bfc343ac8593c2f32dacdff2]. There is no later evidence before the question date showing a change, so the most recent count available is **5 engineers**.",
+          "judgment": {
+            "correct": true,
+            "reason": "模型回答准确包含了开始时的4名工程师和现在的5名工程师，关键信息与参考答案完全一致。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 2321.948,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 120.955,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 0.5
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0000:T0008:P000",
+            "S0000:T0010:P000",
+            "S0006:T0002:P000",
+            "S0000:T0009:P000",
+            "S0006:T0007:P000",
+            "S0006:T0003:P000",
+            "S0032:T0003:P000",
+            "S0019:T0004:P000",
+            "S0032:T0001:P000",
+            "S0004:T0010:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_8748f791_1",
+            "answer_8748f791_2",
+            "sharegpt_xjZo5Ac_0",
+            "31702c20_3",
+            "5ac7f9c5_3"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 0.5
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0000:T0008:P000",
+            "S0000:T0010:P000",
+            "S0006:T0002:P000",
+            "S0000:T0009:P000",
+            "S0006:T0007:P000",
+            "S0006:T0003:P000",
+            "S0032:T0003:P000",
+            "S0019:T0004:P000",
+            "S0032:T0001:P000",
+            "S0004:T0010:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 8550,
+            "prompt_chars": 9301,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 8354,
+                "used_chars": 8354,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 2432,
+              "completion_tokens": 611,
+              "total_tokens": 3043,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 2432
+            },
+            "duration_ms": 3100,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 311,
+              "completion_tokens": 1291,
+              "total_tokens": 1602
+            },
+            "duration_ms": 12241,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 17932.095
+        },
+        {
+          "question_id": "caf03d32",
+          "question_type": "single-session-preference",
+          "question": "I've been struggling with my slow cooker recipes. Any advice on getting better results?",
+          "reference_answer": "The user would prefer responses that provide tips and advice specifically tailored to their slow cooker experiences, utilizing their recent success with beef stew and interest in making yogurt in the slow cooker. They might not prefer general slow cooker recipes or advice unrelated to their specific experiences and interests.",
+          "question_date": "2023/05/30 (Tue) 23:44",
+          "history_sessions": 51,
+          "indexed_chunks": 642,
+          "duplicate_session_ids": 1,
+          "hypothesis": "I can’t determine specific advice for improving slow cooker results from the supplied history.\n\nThe only relevant slow-cooker evidence is from earlier on 2023/05/30: you said you’d recently figured out how to use the slow cooker and made a delicious beef stew [45b7c052e04349bda932d9e5328a1319], and later asked for vegetarian/vegan slow cooker recipes [44e252a6797f42d6814cb87341cd7d66]. The prior assistant reply only listed recipe suggestions—e.g., lentil curry, roasted vegetable stew, black bean chili—without troubleshooting or technique advice [034d8968603a41cba30c71380cada8f1].",
+          "judgment": {
+            "correct": true,
+            "reason": "模型准确调用了用户慢炖锅使用经历，并严格遵循量规中“提供个性化技巧而非通用菜谱”的偏好，正确指出此前回复缺乏实操指导，符合个性化回答标准。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 2503.007,
+          "embedding_cache_hit": false,
+          "retrieval_ms": 153.072,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 1,
+              "recall": 0.5,
+              "all_found": false,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0050:T0000:P000",
+            "S0050:T0006:P000",
+            "S0014:T0010:P000",
+            "S0050:T0001:P000",
+            "S0014:T0002:P000",
+            "S0048:T0002:P000",
+            "S0047:T0004:P000",
+            "S0038:T0008:P000",
+            "S0048:T0004:P000",
+            "S0047:T0006:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_2fc6aabb",
+            "a52e072b",
+            "ec806228",
+            "eb0d8dc1_6",
+            "4b1af06f_1"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 1,
+              "recall": 0.5,
+              "all_found": false,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0050:T0000:P000",
+            "S0050:T0006:P000",
+            "S0014:T0010:P000",
+            "S0050:T0001:P000",
+            "S0014:T0002:P000",
+            "S0048:T0002:P000",
+            "S0047:T0004:P000",
+            "S0038:T0008:P000",
+            "S0048:T0004:P000",
+            "S0047:T0006:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 5421,
+            "prompt_chars": 6136,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 5225,
+                "used_chars": 5225,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 1668,
+              "completion_tokens": 932,
+              "total_tokens": 2600,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 1668
+            },
+            "duration_ms": 4678,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 351,
+              "completion_tokens": 1697,
+              "total_tokens": 2048
+            },
+            "duration_ms": 14793,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 0,
+            "texts": 0,
+            "input_chars": 0,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 22305.431
+        }
+      ],
+      "totals": {
+        "embedding": {
+          "logical_batches": 0,
+          "texts": 0,
+          "input_chars": 0,
+          "failed_batches": 0
+        },
+        "llm": {
+          "reader": {
+            "calls": 5,
+            "usage": {
+              "prompt_tokens": 8929,
+              "completion_tokens": 2698,
+              "total_tokens": 11627
+            }
+          },
+          "judge": {
+            "calls": 5,
+            "usage": {
+              "prompt_tokens": 1131,
+              "completion_tokens": 5299,
+              "total_tokens": 6430
+            }
+          }
+        }
+      }
+    },
+    "hybrid_qa": {
+      "measurement_date": "2026-10-09",
+      "dataset": {
+        "file": "longmemeval_s_cleaned_subset5.json",
+        "sha256": "9e8236f95547af45715de2a1e2bda77e2290c24dcb858654fbc5246ac2e5427e",
+        "cases": 5,
+        "question_ids": [
+          "gpt4_4edbafa2",
+          "1faac195",
+          "c960da58",
+          "031748ae",
+          "caf03d32"
+        ],
+        "source": "https://github.com/xiaowu0162/LongMemEval"
+      },
+      "protocol": {
+        "adapter": "memoria-raw-history-rag-v1",
+        "retriever": "hybrid",
+        "reader": "main",
+        "judge": "fast",
+        "judge_rubric": "independently phrased LongMemEval type criteria; not official GPT-4o grading",
+        "top_k_chunks": 10,
+        "chunk_chars": 1600,
+        "context_chars": 12000,
+        "context_char_budget": 60000,
+        "max_output_tokens": 4096,
+        "concurrency": 2,
+        "assistant_history_included": true,
+        "gold_fields_used_only_for_scoring": [
+          "answer",
+          "answer_session_ids",
+          "has_answer",
+          "question_type"
+        ],
+        "source_ids_exposed_to_system": "opaque positional IDs, not answer-prefixed benchmark IDs",
+        "limitations": [
+          "raw-history index -> actual MemoryEngine -> PromptAssembler/ContextBudget -> optional LLM reader",
+          "does not replay production extraction, human review, skills, episodes, or shared ACL",
+          "chunk-level retrieval and bounded source metrics are not the official session-granularity ranking protocol",
+          "small selected subset; not a 500-question official score",
+          "character limits are not exact token limits"
+        ]
+      },
+      "models": {
+        "embedding": {
+          "model": "text-embedding-v3",
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        },
+        "main": {
+          "model": "deepseek-v4-flash",
+          "base_url": "https://api.deepseek.com/v1"
+        },
+        "fast": {
+          "model": "qwen3.6-flash",
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        }
+      },
+      "environment": {
+        "python": "3.11.7",
+        "sqlite": "3.41.2"
+      },
+      "elapsed_ms": 64739.675,
+      "metrics": {
+        "overall": {
+          "cases": 5,
+          "errors": 0,
+          "retrieved_session": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 1.0,
+            "evidence_recall_all_requested": 1.0,
+            "all_evidence_found_rate": 1.0,
+            "mrr": 1.0
+          },
+          "retrieved_turn": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 1.0,
+            "evidence_recall_all_requested": 1.0,
+            "all_evidence_found_rate": 1.0,
+            "mrr": 0.8
+          },
+          "injected_session": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 1.0,
+            "evidence_recall_all_requested": 1.0,
+            "all_evidence_found_rate": 1.0,
+            "mrr": 1.0
+          },
+          "injected_turn": {
+            "eligible_cases": 5,
+            "requested_eligible_cases": 5,
+            "evidence_recall": 1.0,
+            "evidence_recall_all_requested": 1.0,
+            "all_evidence_found_rate": 1.0,
+            "mrr": 0.8
+          },
+          "qa_judged_cases": 5,
+          "qa_correct": 4,
+          "qa_accuracy": 0.8,
+          "qa_accuracy_all_requested": 0.8
+        },
+        "by_question_type": {
+          "knowledge-update": {
+            "cases": 1,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 0.5
+            },
+            "injected_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 0.5
+            },
+            "qa_judged_cases": 1,
+            "qa_correct": 1,
+            "qa_accuracy": 1.0,
+            "qa_accuracy_all_requested": 1.0
+          },
+          "single-session-preference": {
+            "cases": 1,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "qa_judged_cases": 1,
+            "qa_correct": 0,
+            "qa_accuracy": 0.0,
+            "qa_accuracy_all_requested": 0.0
+          },
+          "single-session-user": {
+            "cases": 2,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_session": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 2,
+              "requested_eligible_cases": 2,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "qa_judged_cases": 2,
+            "qa_correct": 2,
+            "qa_accuracy": 1.0,
+            "qa_accuracy_all_requested": 1.0
+          },
+          "temporal-reasoning": {
+            "cases": 1,
+            "errors": 0,
+            "retrieved_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "retrieved_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 0.5
+            },
+            "injected_session": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 1.0
+            },
+            "injected_turn": {
+              "eligible_cases": 1,
+              "requested_eligible_cases": 1,
+              "evidence_recall": 1.0,
+              "evidence_recall_all_requested": 1.0,
+              "all_evidence_found_rate": 1.0,
+              "mrr": 0.5
+            },
+            "qa_judged_cases": 1,
+            "qa_correct": 1,
+            "qa_accuracy": 1.0,
+            "qa_accuracy_all_requested": 1.0
+          }
+        }
+      },
+      "results": [
+        {
+          "question_id": "gpt4_4edbafa2",
+          "question_type": "temporal-reasoning",
+          "question": "What was the date on which I attended the first BBQ event in June?",
+          "reference_answer": "June 3rd",
+          "question_date": "2023/07/01 (Sat) 02:36",
+          "history_sessions": 41,
+          "indexed_chunks": 621,
+          "duplicate_session_ids": 0,
+          "hypothesis": "You attended the first BBQ event in June on **3 June**, at your colleague’s backyard BBQ party. (Source: S0040:T0000:P000)",
+          "judgment": {
+            "correct": true,
+            "reason": "模型回答明确给出了日期“3 June”，与参考答案“June 3rd”语义完全等价，准确包含了回答问题所需的必要信息。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 6031.566,
+          "embedding_cache_hit": true,
+          "retrieval_ms": 5959.1,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 0.5
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 4
+          },
+          "retrieved_source_ids": [
+            "S0040:T0010:P000",
+            "S0032:T0000:P000",
+            "S0040:T0000:P000",
+            "S0040:T0008:P000",
+            "S0034:T0002:P000",
+            "S0040:T0011:P000",
+            "S0040:T0005:P000",
+            "S0040:T0011:P001",
+            "S0040:T0004:P000",
+            "S0017:T0006:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_0a00c163_2",
+            "answer_0a00c163_1",
+            "22be78fc_2",
+            "7a7a4bf0_3"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 0.5
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 4
+          },
+          "injected_source_ids": [
+            "S0040:T0010:P000",
+            "S0032:T0000:P000",
+            "S0040:T0000:P000",
+            "S0040:T0008:P000",
+            "S0034:T0002:P000",
+            "S0040:T0011:P000",
+            "S0040:T0005:P000",
+            "S0040:T0011:P001",
+            "S0040:T0004:P000",
+            "S0017:T0006:P000"
+          ],
+          "fully_injected_chunks": 9,
+          "context": {
+            "frame_chars": 7648,
+            "prompt_chars": 8342,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 7452,
+                "used_chars": 7452,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 2176,
+              "completion_tokens": 405,
+              "total_tokens": 2581,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 2176
+            },
+            "duration_ms": 2042,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 162,
+              "completion_tokens": 896,
+              "total_tokens": 1058
+            },
+            "duration_ms": 9383,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 1,
+            "texts": 1,
+            "input_chars": 66,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 23581.287
+        },
+        {
+          "question_id": "1faac195",
+          "question_type": "single-session-user",
+          "question": "Where does my sister Emily live?",
+          "reference_answer": "Denver",
+          "question_date": "2023/05/30 (Tue) 19:50",
+          "history_sessions": 45,
+          "indexed_chunks": 633,
+          "duplicate_session_ids": 0,
+          "hypothesis": "Your sister Emily lives in **Denver** (source: S0003:T0002:P000, 2023/05/20).",
+          "judgment": {
+            "correct": true,
+            "reason": "模型回答明确指出地点为Denver，与参考答案完全一致，包含全部必要信息。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 4357.968,
+          "embedding_cache_hit": true,
+          "retrieval_ms": 1051.788,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0003:T0002:P000",
+            "S0043:T0002:P000",
+            "S0019:T0002:P000",
+            "S0003:T0007:P001",
+            "S0007:T0005:P000",
+            "S0003:T0005:P000",
+            "S0003:T0008:P000",
+            "S0003:T0005:P001",
+            "S0019:T0001:P000",
+            "S0041:T0002:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_d01949bf",
+            "d2905eb6_2",
+            "2def525b_2",
+            "87252d80_5",
+            "8064b6ca"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0003:T0002:P000",
+            "S0043:T0002:P000",
+            "S0019:T0002:P000",
+            "S0003:T0007:P001",
+            "S0007:T0005:P000",
+            "S0003:T0005:P000",
+            "S0003:T0008:P000",
+            "S0003:T0005:P001",
+            "S0019:T0001:P000",
+            "S0041:T0002:P000"
+          ],
+          "fully_injected_chunks": 9,
+          "context": {
+            "frame_chars": 7856,
+            "prompt_chars": 8516,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 7660,
+                "used_chars": 7660,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 2176,
+              "completion_tokens": 164,
+              "total_tokens": 2340,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 2176
+            },
+            "duration_ms": 1283,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 133,
+              "completion_tokens": 543,
+              "total_tokens": 676
+            },
+            "duration_ms": 4816,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 1,
+            "texts": 1,
+            "input_chars": 32,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 11786.71
+        },
+        {
+          "question_id": "c960da58",
+          "question_type": "single-session-user",
+          "question": "How many playlists do I have on Spotify?",
+          "reference_answer": "20",
+          "question_date": "2023/05/30 (Tue) 18:45",
+          "history_sessions": 46,
+          "indexed_chunks": 649,
+          "duplicate_session_ids": 0,
+          "hypothesis": "You have **20 playlists on Spotify**, based on what you said on 2023/05/20. (Source: S0004:T0002:P000)",
+          "judgment": {
+            "correct": true,
+            "reason": "模型回答明确给出了播放列表数量为20，与参考答案完全一致。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 4481.711,
+          "embedding_cache_hit": true,
+          "retrieval_ms": 7193.21,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 4
+          },
+          "retrieved_source_ids": [
+            "S0004:T0002:P000",
+            "S0004:T0006:P000",
+            "S0004:T0003:P001",
+            "S0004:T0007:P000",
+            "S0004:T0004:P000",
+            "S0004:T0005:P000",
+            "S0024:T0002:P000",
+            "S0015:T0002:P000",
+            "S0033:T0010:P000",
+            "S0015:T0012:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_e05e4612",
+            "412fdcf4_1",
+            "ultrachat_418604",
+            "705b5399_3"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 4
+          },
+          "injected_source_ids": [
+            "S0004:T0002:P000",
+            "S0004:T0006:P000",
+            "S0004:T0003:P001",
+            "S0004:T0007:P000",
+            "S0004:T0004:P000",
+            "S0004:T0005:P000",
+            "S0024:T0002:P000",
+            "S0015:T0002:P000",
+            "S0033:T0010:P000",
+            "S0015:T0012:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 7614,
+            "prompt_chars": 8282,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 7418,
+                "used_chars": 7418,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 2140,
+              "completion_tokens": 175,
+              "total_tokens": 2315,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 2140
+            },
+            "duration_ms": 2362,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 143,
+              "completion_tokens": 459,
+              "total_tokens": 602
+            },
+            "duration_ms": 3691,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 1,
+            "texts": 1,
+            "input_chars": 40,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 17935.335
+        },
+        {
+          "question_id": "031748ae",
+          "question_type": "knowledge-update",
+          "question": "How many engineers do I lead when I just started my new role as Senior Software Engineer? How many engineers do I lead now?",
+          "reference_answer": "When you just started your new role as Senior Software Engineer, you led 4 engineers. Now, you lead 5 engineers",
+          "question_date": "2023/11/10 (Fri) 04:20",
+          "history_sessions": 46,
+          "indexed_chunks": 640,
+          "duplicate_session_ids": 0,
+          "hypothesis": "When you just started as Senior Software Engineer, you led **4 engineers** — you clarified this on 2023/05/11 in source `S0000:T0010`.\n\nNow, as of your 2023/10/24 update, you lead **5 engineers** — you said you “now lead a team of five engineers” in source `S0006:T0002`.",
+          "judgment": {
+            "correct": true,
+            "reason": "模型准确回答了初始带领4名工程师、目前带领5名工程师的核心信息，与参考答案完全一致。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 5646.995,
+          "embedding_cache_hit": true,
+          "retrieval_ms": 1273.144,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 0.5
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "retrieved_source_ids": [
+            "S0000:T0008:P000",
+            "S0000:T0010:P000",
+            "S0006:T0002:P000",
+            "S0000:T0009:P000",
+            "S0006:T0007:P000",
+            "S0006:T0003:P000",
+            "S0032:T0003:P000",
+            "S0019:T0004:P000",
+            "S0032:T0001:P000",
+            "S0004:T0010:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_8748f791_1",
+            "answer_8748f791_2",
+            "sharegpt_xjZo5Ac_0",
+            "31702c20_3",
+            "5ac7f9c5_3"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 0.5
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 5
+          },
+          "injected_source_ids": [
+            "S0000:T0008:P000",
+            "S0000:T0010:P000",
+            "S0006:T0002:P000",
+            "S0000:T0009:P000",
+            "S0006:T0007:P000",
+            "S0006:T0003:P000",
+            "S0032:T0003:P000",
+            "S0019:T0004:P000",
+            "S0032:T0001:P000",
+            "S0004:T0010:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 8550,
+            "prompt_chars": 9301,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 8354,
+                "used_chars": 8354,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 2420,
+              "completion_tokens": 399,
+              "total_tokens": 2819,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 2420
+            },
+            "duration_ms": 2104,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 259,
+              "completion_tokens": 976,
+              "total_tokens": 1235
+            },
+            "duration_ms": 9728,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 1,
+            "texts": 1,
+            "input_chars": 123,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 18888.97
+        },
+        {
+          "question_id": "caf03d32",
+          "question_type": "single-session-preference",
+          "question": "I've been struggling with my slow cooker recipes. Any advice on getting better results?",
+          "reference_answer": "The user would prefer responses that provide tips and advice specifically tailored to their slow cooker experiences, utilizing their recent success with beef stew and interest in making yogurt in the slow cooker. They might not prefer general slow cooker recipes or advice unrelated to their specific experiences and interests.",
+          "question_date": "2023/05/30 (Tue) 23:44",
+          "history_sessions": 51,
+          "indexed_chunks": 642,
+          "duplicate_session_ids": 1,
+          "hypothesis": "I can’t determine general slow-cooker troubleshooting advice from the supplied history. The only relevant slow-cooker tips I see are specific to **yogurt**:\n\n- Use a **low heat setting** to avoid scorching (S0050:T0013:P001).\n- Incubate for **8–12 hours or overnight** (S0050:T0013:P001).\n- Use a **vegan yogurt starter or probiotic powder** (S0050:T0013:P001).\n- **Strain** the mixture to remove solids, then **chill at least 2 hours** (S0050:T0013:P001).\n\nThe rest of the slow-cooker history is recipe recommendations, not advice for improving results with general slow-cooker recipes (S0050:T0001:P000, S0050:T0007:P000). So for non-yogurt slow-cooker struggles, the history doesn’t contain an answer.",
+          "judgment": {
+            "correct": false,
+            "reason": "回答未能利用量规中强调的‘牛肉炖菜成功经验’和‘慢炖锅制酸奶兴趣’进行个性化建议，仅机械盘点历史数据并否定通用需求，不符合个性化回应用户偏好的要求。"
+          },
+          "judge_requested": true,
+          "evidence_eligible": {
+            "session": true,
+            "turn": true
+          },
+          "index_ms": 4979.67,
+          "embedding_cache_hit": true,
+          "retrieval_ms": 1560.571,
+          "retrieved": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 2
+          },
+          "retrieved_source_ids": [
+            "S0050:T0000:P000",
+            "S0050:T0001:P000",
+            "S0050:T0006:P000",
+            "S0050:T0007:P000",
+            "S0050:T0002:P000",
+            "S0050:T0012:P000",
+            "S0050:T0014:P000",
+            "S0050:T0013:P001",
+            "S0039:T0000:P000",
+            "S0050:T0010:P000"
+          ],
+          "retrieved_benchmark_session_ids": [
+            "answer_2fc6aabb",
+            "sharegpt_3D7Qpuq_14"
+          ],
+          "injected": {
+            "session": {
+              "eligible": true,
+              "expected": 1,
+              "found": 1,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "turn": {
+              "eligible": true,
+              "expected": 2,
+              "found": 2,
+              "recall": 1.0,
+              "all_found": true,
+              "reciprocal_rank": 1.0
+            },
+            "returned_chunks": 10,
+            "returned_sessions": 2
+          },
+          "injected_source_ids": [
+            "S0050:T0000:P000",
+            "S0050:T0001:P000",
+            "S0050:T0006:P000",
+            "S0050:T0007:P000",
+            "S0050:T0002:P000",
+            "S0050:T0012:P000",
+            "S0050:T0014:P000",
+            "S0050:T0013:P001",
+            "S0039:T0000:P000",
+            "S0050:T0010:P000"
+          ],
+          "fully_injected_chunks": 10,
+          "context": {
+            "frame_chars": 6982,
+            "prompt_chars": 7697,
+            "section_stats": [
+              {
+                "name": "Long-term Memory",
+                "original_chars": 6786,
+                "used_chars": 6786,
+                "truncated": false
+              }
+            ],
+            "source_metric_caveat": "a source/turn hit does not prove its answer-bearing text survived chunking/truncation"
+          },
+          "reader_call": {
+            "usage": {
+              "prompt_tokens": 2050,
+              "completion_tokens": 1221,
+              "total_tokens": 3271,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 2050
+            },
+            "duration_ms": 5945,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "judge_call": {
+            "usage": {
+              "prompt_tokens": 395,
+              "completion_tokens": 1711,
+              "total_tokens": 2106
+            },
+            "duration_ms": 15515,
+            "retries": 0,
+            "finish_reason": "stop"
+          },
+          "embedding_calls": {
+            "logical_batches": 1,
+            "texts": 1,
+            "input_chars": 87,
+            "failed_batches": 0
+          },
+          "elapsed_ms": 28223.787
+        }
+      ],
+      "totals": {
+        "embedding": {
+          "logical_batches": 5,
+          "texts": 5,
+          "input_chars": 348,
+          "failed_batches": 0
+        },
+        "llm": {
+          "reader": {
+            "calls": 5,
+            "usage": {
+              "prompt_tokens": 10962,
+              "completion_tokens": 2364,
+              "total_tokens": 13326
+            }
+          },
+          "judge": {
+            "calls": 5,
+            "usage": {
+              "prompt_tokens": 1092,
+              "completion_tokens": 4585,
+              "total_tokens": 5677
+            }
+          }
+        }
+      }
+    }
+  }
+}

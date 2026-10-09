@@ -137,7 +137,18 @@ The governance evaluation reports authorized recall, isolation leakage, lifecycl
 
 The layered-memory runner exercises real local modules for episode provenance, expiry, pins, pending-review filtering, skill fingerprints, context bounds, and per-turn read limits. It uses no model and does not measure answer quality.
 
-For public data, start with [GateMem](https://github.com/rzhub/GateMem) for authorization and forgetting in shared memory. Use a fixed small subset of [LongMemEval](https://github.com/xiaowu0162/LongMemEval) for knowledge updates and abstention, or [LoCoMo](https://github.com/snap-research/locomo) evidence IDs for source recall across sessions. This repository has not published official scores on these public benchmarks.
+The [LongMemEval](https://github.com/xiaowu0162/LongMemEval) adapter now evaluates public conversation histories with offline retrieval, optional embeddings, an LLM reader, and a separate judge:
+
+```bash
+# Defaults to data/benchmark/longmemeval_s_cleaned_subset5.json; no API
+.venv/bin/python -m eval.run_longmemeval
+# Uses the configured embedding, main reader, and fast judge models
+.venv/bin/python -m eval.run_longmemeval --embedding --qa --judge
+```
+
+In the [five-case run](eval/results/longmemeval_subset5.json) on 2026-10-09, lexical/hybrid retrieval reached **90%/100%** annotated-turn recall. Both modes answered the four factual, temporal, and update questions correctly against their reference points. Preference grading is disputed; the report preserves final answers and a suspected judge false positive. This raw-history RAG subset run does not replay human review or shared ACL and is not an official score on all 500 questions. See the [evaluation guide](eval/README.md) for API requirements, caching, and metric definitions.
+
+[GateMem](https://github.com/rzhub/GateMem) remains a candidate for shared authorization and forgetting evaluation; [LoCoMo](https://github.com/snap-research/locomo) evidence IDs can support source recall across sessions.
 
 ## Related Projects
 
