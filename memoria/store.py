@@ -20,6 +20,10 @@ def after(seconds: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
 
 
+class MemorySourceUnavailable(ValueError):
+    """The original user message disappeared before a reviewed write."""
+
+
 class Store:
     def __init__(self, path: Path, vector_backend: str = "auto"):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,6 +97,8 @@ class Store:
                     summary TEXT NOT NULL,
                     covered_message_ids TEXT NOT NULL DEFAULT '[]',
                     cursor_message_id TEXT,
+                    partial_message_id TEXT,
+                    partial_offset INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS drift_runs (
@@ -115,6 +121,11 @@ class Store:
             session_columns = {row[1] for row in self.db.execute("PRAGMA table_info(sessions)").fetchall()}
             if "interrupt_note" not in session_columns:
                 self.db.execute("ALTER TABLE sessions ADD COLUMN interrupt_note TEXT")
+            compaction_columns = {row[1] for row in self.db.execute("PRAGMA table_info(session_compactions)").fetchall()}
+            if "partial_message_id" not in compaction_columns:
+                self.db.execute("ALTER TABLE session_compactions ADD COLUMN partial_message_id TEXT")
+            if "partial_offset" not in compaction_columns:
+                self.db.execute("ALTER TABLE session_compactions ADD COLUMN partial_offset INTEGER NOT NULL DEFAULT 0")
             memory_columns = {row[1] for row in self.db.execute("PRAGMA table_info(memories)").fetchall()}
             migrations = {
                 "embedding": "ALTER TABLE memories ADD COLUMN embedding TEXT",
@@ -244,7 +255,7 @@ class Store:
                 before = self.db.execute("SELECT * FROM messages WHERE session_id=? AND rowid<=? ORDER BY rowid DESC LIMIT ?", (session_id, anchor[0], max(1, limit // 2))).fetchall()
                 after = self.db.execute("SELECT * FROM messages WHERE session_id=? AND rowid>? ORDER BY rowid ASC LIMIT ?", (session_id, anchor[0], limit - len(before))).fetchall()
                 return [dict(row) for row in [*reversed(before), *after]]
-            rows = self.db.execute("SELECT * FROM messages WHERE session_id=? ORDER BY created_at DESC LIMIT ?", (session_id, limit)).fetchall()
+            rows = self.db.execute("SELECT * FROM messages WHERE session_id=? ORDER BY rowid DESC LIMIT ?", (session_id, limit)).fetchall()
         return [dict(row) for row in reversed(rows)]
 
     def message_source(self, message_id: str) -> dict[str, Any] | None:
@@ -291,41 +302,206 @@ class Store:
             item["covered_message_ids"] = []
         return item
 
+    def compaction_batch(
+        self,
+        session_id: str,
+        keep_last: int,
+        *,
+        cursor_message_id: str | None = None,
+        covered_message_ids: tuple[str, ...] | list[str] = (),
+        limit: int = 80,
+    ) -> dict[str, Any]:
+        """Page old, same-session messages in insertion order without a 500-row ceiling."""
+        keep_last = max(1, int(keep_last))
+        limit = max(1, min(int(limit), 80))
+        with self.lock:
+            edge = self.db.execute(
+                "SELECT rowid FROM messages WHERE session_id=? ORDER BY rowid DESC LIMIT 1 OFFSET ?",
+                (session_id, keep_last - 1),
+            ).fetchone()
+            if not edge:
+                return {"eligible_count": 0, "messages": [], "coverage_valid": not covered_message_ids and not cursor_message_id}
+            cutoff = int(edge[0])
+            eligible_count = int(self.db.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id=? AND rowid<?", (session_id, cutoff)
+            ).fetchone()[0])
+            cursor_rowid = 0
+            coverage_valid = not covered_message_ids and not cursor_message_id
+            if cursor_message_id:
+                cursor = self.db.execute(
+                    "SELECT rowid FROM messages WHERE id=? AND session_id=?", (cursor_message_id, session_id)
+                ).fetchone()
+                if cursor and int(cursor[0]) < cutoff:
+                    cursor_rowid = int(cursor[0])
+                    actual_ids = [row[0] for row in self.db.execute(
+                        "SELECT id FROM messages WHERE session_id=? AND rowid<=? ORDER BY rowid",
+                        (session_id, cursor_rowid),
+                    ).fetchall()]
+                    coverage_valid = actual_ids == list(covered_message_ids)
+                else:
+                    coverage_valid = False
+            if not coverage_valid:
+                cursor_rowid = 0
+            rows = self.db.execute(
+                """SELECT id,session_id,role,content,created_at FROM messages
+                   WHERE session_id=? AND rowid>? AND rowid<? ORDER BY rowid LIMIT ?""",
+                (session_id, cursor_rowid, cutoff, limit),
+            ).fetchall()
+        return {"eligible_count": eligible_count, "messages": [dict(row) for row in rows], "coverage_valid": coverage_valid}
+
     def upsert_session_compaction(
         self,
         session_id: str,
         summary: str,
         covered_message_ids: list[str],
         cursor_message_id: str | None,
+        partial_message_id: str | None = None,
+        partial_offset: int = 0,
     ) -> dict[str, Any]:
         item = {
             "session_id": session_id,
             "summary": summary,
             "covered_message_ids": json.dumps(list(covered_message_ids), ensure_ascii=False),
             "cursor_message_id": cursor_message_id,
+            "partial_message_id": partial_message_id,
+            "partial_offset": max(0, int(partial_offset)) if partial_message_id else 0,
             "updated_at": now(),
         }
         with self.lock:
-            self.db.execute(
-                """INSERT INTO session_compactions (session_id,summary,covered_message_ids,cursor_message_id,updated_at)
-                   VALUES (:session_id,:summary,:covered_message_ids,:cursor_message_id,:updated_at)
-                   ON CONFLICT(session_id) DO UPDATE SET
-                     summary=excluded.summary,
-                     covered_message_ids=excluded.covered_message_ids,
-                     cursor_message_id=excluded.cursor_message_id,
-                     updated_at=excluded.updated_at""",
-                item,
-            )
-            self.db.commit()
+            owns_transaction = not self.db.in_transaction
+            try:
+                self.db.execute(
+                    """INSERT INTO session_compactions
+                       (session_id,summary,covered_message_ids,cursor_message_id,partial_message_id,partial_offset,updated_at)
+                       VALUES (:session_id,:summary,:covered_message_ids,:cursor_message_id,:partial_message_id,:partial_offset,:updated_at)
+                       ON CONFLICT(session_id) DO UPDATE SET
+                         summary=excluded.summary,
+                         covered_message_ids=excluded.covered_message_ids,
+                         cursor_message_id=excluded.cursor_message_id,
+                         partial_message_id=excluded.partial_message_id,
+                         partial_offset=excluded.partial_offset,
+                         updated_at=excluded.updated_at""",
+                    item,
+                )
+                if owns_transaction:
+                    self.db.commit()
+            except Exception:
+                if owns_transaction:
+                    self.db.rollback()
+                raise
         return self.session_compaction(session_id) or item
+
+    def try_replace_session_compaction(
+        self,
+        session_id: str,
+        expected_updated_at: str | None,
+        summary: str,
+        covered_message_ids: list[str],
+        cursor_message_id: str | None,
+        *,
+        keep_last: int,
+        partial_message_id: str | None = None,
+        partial_offset: int = 0,
+    ) -> str | None:
+        """Persist a summary only if the row read before summarization is current."""
+        values = (
+            summary, json.dumps(covered_message_ids, ensure_ascii=False), cursor_message_id,
+            partial_message_id, max(0, int(partial_offset)) if partial_message_id else 0,
+            now(),
+        )
+        with self.lock:
+            owns_transaction = not self.db.in_transaction
+            try:
+                if owns_transaction:
+                    self.db.execute("BEGIN IMMEDIATE")
+                page = self.compaction_batch(
+                    session_id, keep_last, cursor_message_id=cursor_message_id,
+                    covered_message_ids=covered_message_ids, limit=1,
+                )
+                valid = page["coverage_valid"] and (
+                    not partial_message_id
+                    or bool(page["messages"] and page["messages"][0]["id"] == partial_message_id)
+                )
+                if not valid:
+                    if owns_transaction:
+                        self.db.rollback()
+                    return None
+                if expected_updated_at is None:
+                    result = self.db.execute(
+                        """INSERT INTO session_compactions
+                           (session_id,summary,covered_message_ids,cursor_message_id,partial_message_id,partial_offset,updated_at)
+                           SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM sessions WHERE id=?)
+                           ON CONFLICT(session_id) DO NOTHING""",
+                        (session_id, *values, session_id),
+                    )
+                else:
+                    result = self.db.execute(
+                        """UPDATE session_compactions SET summary=?,covered_message_ids=?,
+                           cursor_message_id=?,partial_message_id=?,partial_offset=?,updated_at=?
+                           WHERE session_id=? AND updated_at=?""",
+                        (*values, session_id, expected_updated_at),
+                    )
+                if owns_transaction:
+                    self.db.commit()
+                return values[-1] if result.rowcount == 1 else None
+            except Exception:
+                if owns_transaction:
+                    self.db.rollback()
+                raise
+
+    def clear_session_compaction(self, session_id: str, expected_updated_at: str | None) -> bool:
+        """Remove an invalid summary without deleting a concurrent replacement."""
+        with self.lock:
+            if expected_updated_at is None:
+                return self.db.execute(
+                    "SELECT 1 FROM session_compactions WHERE session_id=?", (session_id,)
+                ).fetchone() is None
+            owns_transaction = not self.db.in_transaction
+            try:
+                result = self.db.execute(
+                    "DELETE FROM session_compactions WHERE session_id=? AND updated_at=?",
+                    (session_id, expected_updated_at),
+                )
+                if owns_transaction:
+                    self.db.commit()
+                return result.rowcount == 1
+            except Exception:
+                if owns_transaction:
+                    self.db.rollback()
+                raise
 
     def delete_session(self, session_id: str) -> bool:
         with self.lock:
-            message_ids = [row[0] for row in self.db.execute("SELECT id FROM messages WHERE session_id=?", (session_id,)).fetchall()]
-            for message_id in message_ids:
-                self.db.execute("DELETE FROM messages_fts WHERE id=?", (message_id,))
-            cur = self.db.execute("DELETE FROM sessions WHERE id=?", (session_id,))
-            self.db.commit()
+            owns_transaction = not self.db.in_transaction
+            self.db.execute("BEGIN IMMEDIATE" if owns_transaction else "SAVEPOINT memoria_delete_session")
+            try:
+                self.db.execute(
+                    """DELETE FROM memory_reviews WHERE source_ref IN
+                       (SELECT id FROM messages WHERE session_id=?) OR job_id IN
+                       (SELECT id FROM memory_jobs WHERE source_ref IN
+                        (SELECT id FROM messages WHERE session_id=?))""",
+                    (session_id, session_id),
+                )
+                self.db.execute(
+                    "DELETE FROM memory_jobs WHERE source_ref IN (SELECT id FROM messages WHERE session_id=?)",
+                    (session_id,),
+                )
+                self.db.execute(
+                    "DELETE FROM messages_fts WHERE id IN (SELECT id FROM messages WHERE session_id=?)",
+                    (session_id,),
+                )
+                cur = self.db.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+                if owns_transaction:
+                    self.db.execute("COMMIT")
+                else:
+                    self.db.execute("RELEASE SAVEPOINT memoria_delete_session")
+            except Exception:
+                if owns_transaction:
+                    self.db.execute("ROLLBACK")
+                else:
+                    self.db.execute("ROLLBACK TO SAVEPOINT memoria_delete_session")
+                    self.db.execute("RELEASE SAVEPOINT memoria_delete_session")
+                raise
         return cur.rowcount > 0
 
     def memories(self, query: str = "", limit: int = 100, status: str = "active") -> list[dict[str, Any]]:
@@ -350,7 +526,13 @@ class Store:
             row = self.db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
         return self._memory(dict(row)) if row else None
 
-    def add_memory(self, content: str, kind: str = "fact", importance: int = 3, source: str = "manual", embedding: list[float] | None = None, supersedes_id: str | None = None, reason: str = "", source_ref: str | None = None) -> dict[str, Any]:
+    def _require_memory_source(self, source_ref: str | None) -> None:
+        # Called inside the same write transaction as the memory mutation.
+        row = self.db.execute("SELECT role FROM messages WHERE id=?", (source_ref,)).fetchone()
+        if row is None or row["role"] != "user":
+            raise MemorySourceUnavailable("来源用户消息已删除，不能批准悬空记忆")
+
+    def add_memory(self, content: str, kind: str = "fact", importance: int = 3, source: str = "manual", embedding: list[float] | None = None, supersedes_id: str | None = None, reason: str = "", source_ref: str | None = None, *, require_source: bool = False) -> dict[str, Any]:
         timestamp = now()
         item = {
             "id": uuid.uuid4().hex, "content": content.strip(), "kind": kind,
@@ -364,6 +546,8 @@ class Store:
         with self.lock:
             self.db.execute("BEGIN IMMEDIATE")
             try:
+                if require_source:
+                    self._require_memory_source(source_ref)
                 previous = None
                 if supersedes_id:
                     previous = self.db.execute("SELECT * FROM memories WHERE id=? AND status='active' AND kind=?", (supersedes_id, kind)).fetchone()
@@ -391,16 +575,28 @@ class Store:
                 raise
         return self._memory(item)
 
-    def reinforce_memory(self, memory_id: str, source_ref: str | None = None) -> dict[str, Any] | None:
+    def reinforce_memory(self, memory_id: str, source_ref: str | None = None, *, require_source: bool = False) -> dict[str, Any] | None:
         timestamp = now()
         with self.lock:
-            cur = self.db.execute("""UPDATE memories SET reinforcement=reinforcement+1,
-                last_reinforced_at=?,updated_at=? WHERE id=? AND status='active'""", (timestamp, timestamp, memory_id))
-            if cur.rowcount and source_ref:
-                self.db.execute("""INSERT OR IGNORE INTO memory_operations
-                    (id,source_ref,memory_id,action,previous_id,created_at,undone_at) VALUES (?,?,?,'reinforce',NULL,?,NULL)""",
-                    (uuid.uuid4().hex, source_ref, memory_id, timestamp))
-            self.db.commit()
+            owns_transaction = not self.db.in_transaction
+            self.db.execute("BEGIN IMMEDIATE" if owns_transaction else "SAVEPOINT memoria_reinforce")
+            try:
+                if require_source:
+                    self._require_memory_source(source_ref)
+                cur = self.db.execute("""UPDATE memories SET reinforcement=reinforcement+1,
+                    last_reinforced_at=?,updated_at=? WHERE id=? AND status='active'""", (timestamp, timestamp, memory_id))
+                if cur.rowcount and source_ref:
+                    self.db.execute("""INSERT OR IGNORE INTO memory_operations
+                        (id,source_ref,memory_id,action,previous_id,created_at,undone_at) VALUES (?,?,?,'reinforce',NULL,?,NULL)""",
+                        (uuid.uuid4().hex, source_ref, memory_id, timestamp))
+                self.db.execute("COMMIT" if owns_transaction else "RELEASE SAVEPOINT memoria_reinforce")
+            except BaseException:
+                if owns_transaction:
+                    self.db.execute("ROLLBACK")
+                else:
+                    self.db.execute("ROLLBACK TO SAVEPOINT memoria_reinforce")
+                    self.db.execute("RELEASE SAVEPOINT memoria_reinforce")
+                raise
         return self.memory(memory_id) if cur.rowcount else None
 
     def has_memory_operation(self, source_ref: str, memory_id: str) -> bool:

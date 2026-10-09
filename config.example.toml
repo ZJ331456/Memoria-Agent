@@ -82,6 +82,25 @@ lease_seconds = 180
 max_retries = 3
 backoff_seconds = 5
 
+# 分层预算是字符上限（不是精确 token），适合本地单用户运行的调优起点。
+# 说明与来源：docs/memory-layers/README.md。共享记忆仍独立使用空间权限。
+[memory.layers]
+enabled = true
+episodic_enabled = true
+semantic_chars = 3000
+episodic_chars = 1800
+procedural_chars = 2400
+summary_chars = 2000
+catalog_chars = 1200
+self_chars = 1200
+context_chars = 12000
+episode_ttl_days = 90
+episode_top_k = 3
+episode_max_active = 1000
+maintenance_interval_seconds = 3600
+retrieval_max_calls = 6
+retrieval_max_chars = 12000
+
 [server]
 host = "127.0.0.1"
 port = 2237

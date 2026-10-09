@@ -8,6 +8,8 @@ from .drift import DriftWorker
 from .llm import LLMClient
 from .store import Store
 from .memory import EmbeddingClient, MemoryEngine, MemoryJobWorker, MarkdownMemoryLayer
+from .memory.episodic import EpisodicMemory
+from .memory.forgetting import ForgettingWorker
 from .mcp import McpHost
 from .models_config import public_models, save_model_overrides, test_model_slot
 from .runtime import AgentRuntime
@@ -33,11 +35,18 @@ class AgentService:
             if settings.skills_enabled
             else None
         )
+        layers = getattr(settings, "memory_layers", None)
+        self.episodes = EpisodicMemory(store, layers) if layers and layers.enabled and layers.episodic_enabled else None
+        self.forgetting_worker = (
+            ForgettingWorker(self.episodes, layers.maintenance_interval_seconds)
+            if self.episodes else None
+        )
         tools = build_registry(
             store,
             memory,
             self.skills,
             http_allowed_hosts=settings.http_allowed_hosts,
+            episodes=self.episodes,
         )
         self.tool_presentation = ToolPresentation(tools, enabled=settings.tool_search_enabled)
         self.mcp = McpHost(tools, settings.mcp_config_file, enabled=settings.mcp_enabled)
@@ -50,6 +59,7 @@ class AgentService:
             skills=self.skills,
             markdown=self.markdown,
             tool_presentation=self.tool_presentation,
+            episodes=self.episodes,
         )
         self.memory_worker = MemoryJobWorker(
             store, llm, memory, lease_seconds=settings.memory_job_lease_seconds,

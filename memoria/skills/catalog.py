@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -25,6 +26,7 @@ class SkillRecord:
     root_dir: Path | None = None
     requires_bins: tuple[str, ...] = ()
     requires_env: tuple[str, ...] = ()
+    revision: str = ""
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -35,6 +37,7 @@ class SkillRecord:
             "available": self.available,
             "missing": self.missing,
             "body_chars": len(self.body),
+            "revision": self.revision,
         }
 
 
@@ -159,6 +162,7 @@ class SkillCatalog:
             root_dir=root_dir,
             requires_bins=bins,
             requires_env=envs,
+            revision=hashlib.sha256(content.encode("utf-8")).hexdigest(),
         )
 
     @staticmethod

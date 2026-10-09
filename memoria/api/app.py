@@ -14,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..config import Settings
 from ..governance import GovernanceError, MemoryGovernance
@@ -23,7 +23,7 @@ from ..memory import export_memories_markdown
 from ..observability import MetricRegistry, RequestContext
 from ..security import RequestGate
 from ..service import AgentService
-from ..store import Store
+from ..store import MemorySourceUnavailable, Store
 from .governance import governance_router
 
 MemoryKind = Literal["fact", "preference", "profile", "goal", "procedure"]
@@ -210,6 +210,25 @@ class MemoryReviewApproval(StrictModel):
     importance: int = Field(ge=1, le=5)
 
 
+class EpisodePatch(StrictModel):
+    pin: bool | None = Field(default=None, strict=True)
+    archive: bool | None = Field(default=None, strict=True)
+    reason: str | None = Field(default=None, max_length=300)
+
+    @model_validator(mode="after")
+    def one_action(self):
+        fields = self.model_fields_set
+        if fields == {"pin"} and type(self.pin) is bool:
+            return self
+        if fields in ({"archive"}, {"archive", "reason"}) and self.archive is True:
+            return self
+        raise ValueError("仅可提交 pin 布尔值，或 archive=true 及可选 reason")
+
+
+class EpisodeMaintenanceBody(StrictModel):
+    dry_run: bool = Field(default=True, strict=True)
+
+
 class MessageSourceResponse(BaseModel):
     message_id: str
     session_id: str
@@ -248,6 +267,7 @@ TAGS = [
     {"name": "sessions", "description": "会话生命周期和消息历史。"},
     {"name": "agent", "description": "执行完整 Agent turn，包括记忆召回、工具循环和 trace。"},
     {"name": "memories", "description": "长期记忆查询、创建、编辑和删除。"},
+    {"name": "memory layers", "description": "分层预算、任务情节记忆与遗忘维护。"},
     {"name": "markdown", "description": "MEMORY/SELF/PENDING Markdown 双层记忆。"},
     {"name": "tools", "description": "工具目录、Tool Search 与受风险级别保护的调试执行。"},
     {"name": "mcp", "description": "外部 MCP server 连接状态与热重载。"},
@@ -286,6 +306,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     service = AgentService(settings, store, LLMClient(settings))
     session_locks: dict[str, asyncio.Lock] = {}
     active_turns: dict[str, asyncio.Task] = {}
+    deleting_sessions: set[str] = set()
     request_gate = RequestGate(settings)
     metrics = MetricRegistry()
     service.set_busy_check(lambda: bool(active_turns))
@@ -295,11 +316,19 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         await service.start_integrations()
         memory_task = asyncio.create_task(service.memory_worker.run(), name="memoria-memory-worker")
         drift_task = asyncio.create_task(service.drift.run_loop(), name="memoria-drift-worker")
+        forgetting_task = (
+            asyncio.create_task(service.forgetting_worker.run_loop(), name="memoria-forgetting-worker")
+            if service.forgetting_worker else None
+        )
         try:
             yield
         finally:
+            if forgetting_task:
+                forgetting_task.cancel()
             drift_task.cancel()
             memory_task.cancel()
+            if forgetting_task:
+                with suppress(asyncio.CancelledError): await forgetting_task
             with suppress(asyncio.CancelledError): await drift_task
             with suppress(asyncio.CancelledError): await memory_task
             for task in active_turns.values(): task.cancel()
@@ -376,8 +405,56 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "pipeline": service.runtime.pipeline.inspect(),
             "skills": skills,
             "markdown": service.markdown.status(),
+            "memory_layers": {
+                "config": settings.memory_layers.public_dict() if settings.memory_layers else {"enabled": False},
+                "episodic": service.episodes.stats() if service.episodes else {"enabled": False},
+            },
             "setup": service.models_public(),
         }
+
+    def episode_manager():
+        if not service.episodes:
+            raise HTTPException(409, "任务情节记忆未启用")
+        return service.episodes
+
+    @app.get("/api/memory-layers", tags=["memory layers"], summary="查看五层记忆配置与任务情节记忆统计")
+    def memory_layers():
+        return {
+            "config": settings.memory_layers.public_dict() if settings.memory_layers else {"enabled": False},
+            "episodic": service.episodes.stats() if service.episodes else {"enabled": False},
+        }
+
+    @app.get("/api/episodes", tags=["memory layers"], summary="检索有来源的任务执行记录")
+    def list_episodes(
+        query: str = Query(default="", max_length=300),
+        status: Literal["active", "archive", "all"] = "active",
+        limit: int = Query(default=100, ge=1, le=500),
+    ):
+        episodes = episode_manager()
+        if query.strip():
+            if status != "active":
+                raise HTTPException(422, "关键词检索仅支持 active 记录；归档记录请使用列表")
+            return episodes.search(query, limit)
+        return episodes.list(limit, status)
+
+    @app.post("/api/episodes/maintenance", tags=["memory layers"], summary="预览或执行任务情节记忆软归档")
+    def maintain_episodes(body: EpisodeMaintenanceBody = EpisodeMaintenanceBody()):
+        return episode_manager().maintenance(dry_run=body.dry_run)
+
+    @app.get("/api/episodes/{episode_id}", tags=["memory layers"], summary="查看任务执行记录与来源消息 ID")
+    def episode_detail(episode_id: str):
+        item = episode_manager().detail(episode_id, include_expired=True)
+        if not item:
+            raise HTTPException(404, "任务执行记录不存在或来源已删除")
+        return item
+
+    @app.patch("/api/episodes/{episode_id}", tags=["memory layers"], summary="固定或软归档任务执行记录")
+    def update_episode(episode_id: str, body: EpisodePatch):
+        episodes = episode_manager()
+        item = episodes.pin(episode_id, body.pin) if "pin" in body.model_fields_set else episodes.archive(episode_id, body.reason or "")
+        if not item:
+            raise HTTPException(404, "任务执行记录不存在或已归档")
+        return item
 
     @app.get("/api/setup/status", tags=["setup"], summary="Setup 向导状态")
     def setup_status():
@@ -535,12 +612,17 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/chat", response_model=ChatResponse, tags=["agent"], summary="执行一轮 Agent 对话")
     async def chat(session_id: str, body: ChatBody, request: Request):
+        if session_id in deleting_sessions: raise HTTPException(409, "该会话正在删除")
         if not store.session(session_id): raise HTTPException(404, "会话不存在")
         lock = session_locks.setdefault(session_id, asyncio.Lock())
         if lock.locked(): raise HTTPException(409, "该会话已有一轮对话正在执行")
         request_id = getattr(request.state, "request_id", None)
         try:
             async with lock:
+                if session_id in deleting_sessions:
+                    raise HTTPException(409, "该会话正在删除")
+                if not store.session(session_id):
+                    raise HTTPException(404, "会话不存在")
                 task = asyncio.create_task(service.chat_with_trace(session_id, body.content.strip(), request_id=request_id))
                 active_turns[session_id] = task
                 message, memories, trace = await task
@@ -553,6 +635,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/chat/stream", tags=["agent"], summary="以 SSE 流式执行一轮 Agent 对话")
     async def chat_stream(session_id: str, body: ChatBody, request: Request):
+        if session_id in deleting_sessions: raise HTTPException(409, "该会话正在删除")
         if not store.session(session_id): raise HTTPException(404, "会话不存在")
         lock = session_locks.setdefault(session_id, asyncio.Lock())
         if lock.locked() or session_id in active_turns: raise HTTPException(409, "该会话已有一轮对话正在执行")
@@ -603,9 +686,24 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {"status":"cancelled","session_id":session_id}
 
     @app.delete("/api/sessions/{session_id}", status_code=204, tags=["sessions"], summary="删除会话及其消息")
-    def delete_session(session_id: str):
-        if not store.delete_session(session_id): raise HTTPException(404, "会话不存在")
-        return Response(status_code=204)
+    async def delete_session(session_id: str):
+        if session_id in deleting_sessions:
+            raise HTTPException(409, "该会话正在删除")
+        deleting_sessions.add(session_id)
+        lock = session_locks.setdefault(session_id, asyncio.Lock())
+        try:
+            task = active_turns.get(session_id)
+            if task and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            async with lock:
+                if not store.delete_session(session_id):
+                    raise HTTPException(404, "会话不存在")
+            return Response(status_code=204)
+        finally:
+            deleting_sessions.discard(session_id)
+            if not lock.locked() and session_id not in active_turns:
+                session_locks.pop(session_id, None)
 
     @app.get("/api/memories", response_model=list[MemoryResponse], tags=["memories"], summary="搜索长期记忆")
     async def memories(q: str = Query(default="", max_length=200), limit: int = Query(default=100, ge=1, le=500), status: Literal["active", "superseded", "all"] = "active"):
@@ -648,14 +746,24 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.post("/api/memory-reviews/{review_id}/approve", response_model=MemoryReviewResponse, tags=["memories"], summary="批准并写入候选记忆")
     async def approve_memory_review(review_id: str, body: MemoryReviewApproval):
         if not body.content.strip(): raise HTTPException(422, "记忆内容不能为空")
-        if not store.memory_review(review_id): raise HTTPException(404, "候选记忆不存在")
+        candidate = store.memory_review(review_id)
+        if not candidate: raise HTTPException(404, "候选记忆不存在")
+        if not store.message_source(candidate["source_ref"]):
+            raise HTTPException(409, "来源消息已删除，不能批准悬空记忆")
         review = store.claim_memory_review(review_id, body.content, body.kind, body.importance)
         if not review: raise HTTPException(409, "候选记忆已处理，请刷新审核队列")
+        if not store.message_source(review["source_ref"]):
+            store.reset_memory_review(review_id)
+            raise HTTPException(409, "来源消息已删除，不能批准悬空记忆")
         try:
             result = await service.runtime.memory.remember(
                 body.content, body.kind, body.importance, "reviewed_conversation", review["source_ref"],
+                require_source=True,
             )
             store.finish_memory_review(review_id, result.memory["id"] if result.memory else None, result.action)
+        except MemorySourceUnavailable as exc:
+            store.reset_memory_review(review_id)
+            raise HTTPException(409, "来源消息已删除，不能批准悬空记忆") from exc
         except BaseException as exc:
             store.reset_memory_review(review_id)
             if isinstance(exc, asyncio.CancelledError): raise

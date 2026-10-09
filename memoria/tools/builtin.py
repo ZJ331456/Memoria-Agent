@@ -6,6 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from ..memory import MemoryEngine
+from ..memory.episodic import EpisodicMemory
 from ..skills import SkillCatalog
 from ..store import Store
 from .http_get import DEFAULT_ALLOWED_HOSTS, fetch_url
@@ -22,6 +23,7 @@ def build_registry(
     skills: SkillCatalog | None = None,
     *,
     http_allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS,
+    episodes: EpisodicMemory | None = None,
 ) -> ToolRegistry:
     registry = ToolRegistry()
     async def recall(a):
@@ -35,6 +37,10 @@ def build_registry(
         return store.add_memory(a["content"], a.get("kind", "fact"), int(a.get("importance", 3)), "agent_tool")
     async def forget(a): return {"deleted": store.delete_memory(a["memory_id"])}
     async def history(a): return store.search_messages(a["query"], int(a.get("limit", 6)))
+    async def recall_episodes(a):
+        if not episodes:
+            return {"error": "episodic memory is disabled"}
+        return episodes.search(str(a["query"]), int(a.get("limit", 3)))
     async def clock(a): return datetime.now(ZoneInfo(a.get("timezone", "Asia/Shanghai"))).isoformat()
     async def calculate(a): return _safe_calculate(a["expression"])
     async def load_skill(a):
@@ -47,6 +53,7 @@ def build_registry(
             return {"error": f"技能不可用：{record.name}", "missing": record.missing}
         return {
             "name": record.name,
+            "revision": record.revision,
             "description": record.description,
             "triggers": list(record.triggers),
             "base_directory": str(record.root_dir) if record.root_dir else "",
@@ -78,6 +85,12 @@ def build_registry(
         _schema({"query":{"type":"string","minLength":1,"maxLength":300},"limit":{"type":"integer","minimum":1,"maximum":20}}, ["query"]),
         history, search_hint="历史 会话消息 history", always_on=False,
     ))
+    if episodes:
+        registry.register(Tool(
+            "recall_episodes", "检索过去的任务执行记录；结果不代表已验证的用户事实。",
+            _schema({"query":{"type":"string","minLength":1,"maxLength":300},"limit":{"type":"integer","minimum":1,"maximum":20}}, ["query"]),
+            recall_episodes, search_hint="历史任务 情节记忆 episode outcome", always_on=False,
+        ))
     registry.register(Tool(
         "current_time", "获取指定 IANA 时区的当前时间。",
         _schema({"timezone":{"type":"string","maxLength":64}}, []),

@@ -5,7 +5,10 @@ import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .memory.layer_settings import MemoryLayerSettings
 
 _ENV = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -101,6 +104,7 @@ class Settings:
     host: str
     port: int
     source: Path
+    memory_layers: MemoryLayerSettings | None = None
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Settings":
@@ -217,6 +221,10 @@ class Settings:
             port=int(server.get("port", 2237)),
             source=source,
         )
+        # Import after ModelConfig is defined: memory's embedding module imports it.
+        from .memory.layer_settings import MemoryLayerSettings
+
+        settings.memory_layers = MemoryLayerSettings.from_dict(memory_section.get("layers", {}))
         from .models_config import apply_overrides
 
         return apply_overrides(settings)
@@ -233,6 +241,7 @@ class Settings:
             "mcp_enabled": self.mcp_enabled, "mcp_config_file": str(self.mcp_config_file),
             "drift_enabled": self.drift_enabled,
             "markdown_enabled": self.markdown_enabled, "markdown_directory": str(self.markdown_directory),
+            "memory_layers": self.memory_layers.public_dict() if self.memory_layers else None,
             "setup_needed": not bool(self.main.api_key and self.main.model and self.main.base_url),
         }
 

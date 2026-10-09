@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -9,6 +12,8 @@ from ..config import Settings
 from ..lifecycle import Phase, Pipeline, TurnContext
 from ..llm import ContextLengthError, LLMClient
 from ..memory import MemoryEngine, MemoryQueryPlanner
+from ..memory.budget import TurnMemoryBudget
+from ..memory.episodic import EpisodicMemory
 from ..observability import EventBus, RequestContext, TurnTracer
 from ..prompting import ContextBudget, PromptAssembler, PromptSection
 from ..memory.layer import MarkdownMemoryLayer
@@ -18,6 +23,10 @@ from ..tools import ToolPolicy, ToolPresentation, ToolRegistry
 from ..tools.loop_guard import ToolLoopGuard
 from ..tools.policy import ToolAuthorization
 from .compaction import SessionCompactor
+
+
+logger = logging.getLogger(__name__)
+_MEMORY_READ_TOOLS = frozenset({"recall_memory", "recall_episodes", "search_history", "load_skill"})
 
 
 class AgentRuntime:
@@ -33,6 +42,7 @@ class AgentRuntime:
         skills: SkillCatalog | None = None,
         markdown: MarkdownMemoryLayer | None = None,
         tool_presentation: ToolPresentation | None = None,
+        episodes: EpisodicMemory | None = None,
     ):
         self.settings = settings
         self.store = store
@@ -42,12 +52,28 @@ class AgentRuntime:
         self.skills = skills
         self.markdown = markdown
         self.tool_presentation = tool_presentation or ToolPresentation(tools, enabled=False)
+        self.episodes = episodes
+        self.layers = getattr(settings, "memory_layers", None)
         self.pipeline = pipeline or Pipeline()
         self.event_bus = event_bus or EventBus()
         self.context_budget = ContextBudget(settings.context_char_budget)
         self.retrieval_planner = MemoryQueryPlanner(llm.plan_memory_retrieval)
         self.tool_policy = ToolPolicy()
-        self.prompt_assembler = PromptAssembler()
+        if self.layers and self.layers.enabled:
+            self.prompt_assembler = PromptAssembler(
+                section_limits={
+                    "Long-term Memory": self.layers.semantic_chars,
+                    "Past Task Episodes": self.layers.episodic_chars,
+                    "Active Skills": self.layers.procedural_chars,
+                    "Session Summary": self.layers.summary_chars,
+                    "Self": self.layers.self_chars,
+                    "Available Skills": self.layers.catalog_chars,
+                    "Tool Search": self.layers.catalog_chars,
+                },
+                max_frame_chars=min(self.layers.context_chars, self.layers.retrieval_max_chars),
+            )
+        else:
+            self.prompt_assembler = PromptAssembler()
         self.compactor = SessionCompactor(store, _FastSummarizer(llm))
 
     # Absolute ceiling even when max_iterations=0 (unlimited). Use /cancel to stop earlier.
@@ -77,6 +103,11 @@ class AgentRuntime:
         context = TurnContext(session_id, user_text)
         context.metadata["turn_id"] = turn_id
         context.metadata["turn_kind"] = turn_kind
+        user_message: dict[str, Any] | None = None
+        memory_budget = (
+            TurnMemoryBudget(self.layers.retrieval_max_calls, self.layers.retrieval_max_chars)
+            if self.layers and self.layers.enabled else None
+        )
         with RequestContext(session_id=session_id, turn_id=turn_id, request_id=request_id):
             try:
                 await self.pipeline.run(Phase.BEFORE_TURN, context)
@@ -108,7 +139,27 @@ class AgentRuntime:
                     "sufficient": bool(context.memories and context.memories[0].get("retrieval", {}).get("score", 0) > 0),
                 }
 
+                episodes = (
+                    self.episodes.search(user_text, self.layers.episode_top_k)
+                    if self.episodes and self.layers and len(user_text.strip()) >= 4 and turn_kind == "chat" else []
+                )
+                context.metadata["episode_retrieval"] = {
+                    "matched": len(episodes), "injected": 0, "ids": [],
+                }
+
                 extra_sections: list[PromptSection] = []
+                if episodes:
+                    lines = []
+                    for episode in episodes:
+                        source = f"user={episode['user_message_id']}"
+                        if episode.get("assistant_message_id"):
+                            source += f", assistant={episode['assistant_message_id']}"
+                        lines.append(
+                            f"- [episode:{episode['id']}] 任务执行记录，不是已验证的用户事实 | source({source}) | "
+                            f"outcome={episode['outcome']} | task={episode['task'][:200]} | "
+                            f"result={episode['result'][:300]}"
+                        )
+                    extra_sections.append(PromptSection("Past Task Episodes", "\n".join(lines), 32))
                 if turn_kind == "drift":
                     extra_sections.append(
                         PromptSection(
@@ -122,6 +173,7 @@ class AgentRuntime:
                     if self_text.strip():
                         extra_sections.append(PromptSection("Self", self_text, 15))
                     context.metadata["markdown_layer"] = self.markdown.status()
+                catalog_text = ""
                 if self.skills:
                     if force_skill:
                         record = self.skills.get(force_skill)
@@ -133,18 +185,29 @@ class AgentRuntime:
                     else:
                         matches = self.skills.select(user_text)
                         catalog_text, active_text = self.skills.render_sections(matches)
-                    if catalog_text:
-                        extra_sections.append(PromptSection("Available Skills", catalog_text, 40))
                     if active_text:
                         extra_sections.append(PromptSection("Active Skills", active_text, 45))
                     context.metadata["skills"] = {
                         "matched": [
-                            {"name": item.skill.name, "score": item.score, "reason": item.reason}
+                            {"name": item.skill.name, "revision": item.skill.revision,
+                             "score": item.score, "reason": item.reason}
                             for item in matches
                         ],
                         "catalog_size": len(self.skills.list()),
+                        "loaded": [],
                     }
                 tool_catalog = self.tool_presentation.catalog_prompt()
+                if self.layers and self.layers.enabled:
+                    catalog_cap = self.layers.catalog_chars
+                    if catalog_text and tool_catalog:
+                        skills_cap = catalog_cap - min(len(tool_catalog), catalog_cap // 2)
+                        catalog_text = catalog_text[:skills_cap]
+                        tool_catalog = tool_catalog[:catalog_cap - len(catalog_text)]
+                    else:
+                        catalog_text = catalog_text[:catalog_cap]
+                        tool_catalog = tool_catalog[:catalog_cap]
+                if catalog_text:
+                    extra_sections.append(PromptSection("Available Skills", catalog_text, 40))
                 if tool_catalog:
                     extra_sections.append(PromptSection("Tool Search", tool_catalog, 35))
                 context.metadata["tool_search"] = self.tool_presentation.public_status()
@@ -159,6 +222,32 @@ class AgentRuntime:
                 context.messages = assembled.as_messages()
                 context.messages += [{"role": message["role"], "content": message["content"]} for message in history]
                 context.metadata["prompt_sections"] = [section.name for section in assembled.sections]
+                episode_content = next(
+                    (section.content for section in assembled.sections if section.name == "Past Task Episodes"), ""
+                )
+                injected_episode_ids = [
+                    item["id"] for item in episodes
+                    if f"[episode:{item['id']}]" in episode_content and item["user_message_id"] in episode_content
+                ]
+                context.metadata["episode_retrieval"]["injected"] = len(injected_episode_ids)
+                context.metadata["episode_retrieval"]["ids"] = injected_episode_ids
+                if self.skills:
+                    active_content = next(
+                        (section.content for section in assembled.sections if section.name == "Active Skills"), ""
+                    )
+                    context.metadata["skills"]["injected"] = [
+                        {"name": item.skill.name, "revision": item.skill.revision}
+                        for item in matches
+                        if re.search(r"(?m)^### skill:" + re.escape(item.skill.name) + r" \(", active_content)
+                    ]
+                context.metadata["memory_layers"] = {
+                    "enabled": bool(self.layers and self.layers.enabled),
+                    "section_stats": assembled.section_stats,
+                    "frame_chars": len(assembled.context_frame["content"]) if assembled.context_frame else 0,
+                }
+                if memory_budget:
+                    memory_budget.account_initial(context.metadata["memory_layers"]["frame_chars"])
+                    context.metadata["memory_tool_budget"] = memory_budget.public_dict()
                 if interrupt_note:
                     self.store.clear_interrupt_note(session_id)
 
@@ -191,6 +280,8 @@ class AgentRuntime:
                         "final_chars": budget.final_chars,
                         "dropped_messages": budget.dropped_messages,
                         "truncated_tool_results": budget.truncated_tool_results,
+                        "truncated_messages": budget.truncated_messages,
+                        "preserved_context_frame": budget.preserved_context_frame,
                     }
                     try:
                         if on_event:
@@ -205,8 +296,25 @@ class AgentRuntime:
                     except ContextLengthError:
                         emergency = self.context_budget.emergency(context.messages)
                         context.messages = emergency.messages
-                        context.metadata["context_budget"]["emergency_retry"] = True
-                        context.metadata["context_budget"]["final_chars"] = emergency.final_chars
+                        normal_stats = dict(context.metadata["context_budget"])
+                        context.metadata["context_budget"] = {
+                            "original_chars": normal_stats["original_chars"],
+                            "final_chars": emergency.final_chars,
+                            "dropped_messages": normal_stats["dropped_messages"] + emergency.dropped_messages,
+                            "truncated_tool_results": normal_stats["truncated_tool_results"] + emergency.truncated_tool_results,
+                            "truncated_messages": normal_stats["truncated_messages"] + emergency.truncated_messages,
+                            "preserved_context_frame": emergency.preserved_context_frame,
+                            "emergency_retry": True,
+                            "normal": normal_stats,
+                            "emergency": {
+                                "original_chars": emergency.original_chars,
+                                "final_chars": emergency.final_chars,
+                                "dropped_messages": emergency.dropped_messages,
+                                "truncated_tool_results": emergency.truncated_tool_results,
+                                "truncated_messages": emergency.truncated_messages,
+                                "preserved_context_frame": emergency.preserved_context_frame,
+                            },
+                        }
                         result = await self.llm.chat(context.messages, tools=self.tool_presentation.schemas())
                     self._record_llm(context, result)
                     if not result.tool_calls:
@@ -235,10 +343,14 @@ class AgentRuntime:
                             "elapsed_ms": 0,
                             "preview": f"blocked repeated signature {signature[:160]}",
                         })
-                        summary = await self.llm.chat(
-                            context.messages
-                            + [{"role": "user", "content": "请停止调用工具，基于已有结果直接给出简洁的最终答复；说明已经完成什么和仍缺少什么。"}]
-                        )
+                        final_messages = context.messages + [{
+                            "role": "user",
+                            "content": f"{user_text}\n\n请停止调用工具，基于已有结果直接给出简洁的最终答复；说明已经完成什么和仍缺少什么。",
+                        }]
+                        final_budget = self.context_budget.apply(final_messages)
+                        context.metadata["context_budget"]["loop_guard_final_chars"] = final_budget.final_chars
+                        summary = await self.llm.chat(final_budget.messages)
+                        self._record_llm(context, summary)
                         context.response = summary.content or "检测到重复工具调用，已安全停止。"
                         break
 
@@ -247,8 +359,15 @@ class AgentRuntime:
                         authorization.allowed_write_tools,
                         step,
                         on_event,
+                        memory_budget,
                     )
                     context.tool_chain.extend(tool_records)
+                    if self.skills:
+                        context.metadata["skills"]["loaded"].extend(
+                            record["loaded_skill"] for record in tool_records if "loaded_skill" in record
+                        )
+                    if memory_budget:
+                        context.metadata["memory_tool_budget"] = memory_budget.public_dict()
                     for call, record in zip(result.tool_calls, tool_records):
                         context.messages.append({
                             "role": "tool",
@@ -278,12 +397,16 @@ class AgentRuntime:
                     context.tool_chain,
                     metadata=context.metadata,
                 )
+                self._record_episode_safe(
+                    turn_kind, session_id, user_message, assistant_message, user_text,
+                    "completed", context.response, "", context.tool_chain, trace["id"],
+                )
                 return assistant_message, created, trace
             except asyncio.CancelledError:
                 note = f"上一轮在处理「{user_text[:80]}」时被中断；已完成 {len(context.tool_chain)} 个工具步骤。"
                 self.store.set_interrupt_note(session_id, note)
                 await self.event_bus.emit("turn.cancelled", {"session_id": session_id, "turn_id": turn_id})
-                tracer.finish(
+                trace = tracer.finish(
                     "cancelled",
                     len(context.tool_chain),
                     context.memories,
@@ -291,19 +414,27 @@ class AgentRuntime:
                     "turn cancelled",
                     context.metadata,
                 )
+                self._record_episode_safe(
+                    turn_kind, session_id, user_message, None, user_text,
+                    "cancelled", "", "turn cancelled", context.tool_chain, trace["id"],
+                )
                 raise
             except Exception as exc:
                 await self.event_bus.emit(
                     "turn.failed",
                     {"session_id": session_id, "turn_id": turn_id, "error": f"{type(exc).__name__}: {exc}"},
                 )
-                tracer.finish(
+                trace = tracer.finish(
                     "failed",
                     len(context.tool_chain),
                     context.memories,
                     context.tool_chain,
                     f"{type(exc).__name__}: {exc}",
                     context.metadata,
+                )
+                self._record_episode_safe(
+                    turn_kind, session_id, user_message, None, user_text,
+                    "failed", "", f"{type(exc).__name__}: {exc}", context.tool_chain, trace["id"],
                 )
                 raise
 
@@ -313,6 +444,7 @@ class AgentRuntime:
         allowed_write_tools: set[str],
         step: int,
         on_event: Callable[[dict[str, Any]], Awaitable[None]] | None,
+        memory_budget: TurnMemoryBudget | None = None,
     ) -> list[dict[str, Any]]:
         async def run_one(call: dict[str, Any]) -> dict[str, Any]:
             decoded = self.tool_presentation.decode(call["name"], call["arguments"])
@@ -329,23 +461,54 @@ class AgentRuntime:
                 }
             else:
                 tool_name, tool_args = decoded
-                tool_result = await self.tools.execute(
-                    tool_name,
-                    tool_args,
-                    allowed_write_tools=allowed_write_tools,
-                )
+                blocked = bool(memory_budget and not memory_budget.allow_call(tool_name))
+                budget_blocked = blocked
+                budget_truncated = False
+                if blocked:
+                    content = "[本轮记忆检索调用预算已用尽；工具未执行]"
+                    tool_ok, elapsed_ms = False, 0
+                else:
+                    tool_result = await self.tools.execute(
+                        tool_name,
+                        tool_args,
+                        allowed_write_tools=allowed_write_tools,
+                    )
+                    content = tool_result.content
+                    tool_ok, elapsed_ms = tool_result.ok, tool_result.elapsed_ms
+                    if memory_budget and tool_name in _MEMORY_READ_TOOLS:
+                        consumed = memory_budget.consume(content)
+                        if consumed != content:
+                            if consumed.startswith("[本轮记忆检索预算已用尽"):
+                                budget_blocked = True
+                                tool_ok = False
+                            else:
+                                budget_truncated = True
+                        content = consumed
                 record = {
                     "step": step,
                     "name": tool_name,
                     "arguments": tool_args,
-                    "ok": tool_result.ok,
-                    "elapsed_ms": tool_result.elapsed_ms,
-                    "preview": tool_result.content[:300],
-                    "content": tool_result.content,
+                    "ok": tool_ok,
+                    "elapsed_ms": elapsed_ms,
+                    "preview": content[:300],
+                    "content": content,
                     "parallel": len(tool_calls) > 1,
                 }
+                if budget_blocked:
+                    record["budget_blocked"] = True
+                if budget_truncated:
+                    record["budget_truncated"] = True
                 if call["name"] == "tool_call":
                     record["via"] = "tool_call"
+                if tool_name == "load_skill" and tool_ok and self.skills:
+                    try:
+                        loaded = json.loads(content)
+                    except (TypeError, ValueError):
+                        loaded = {}
+                    if isinstance(loaded, dict) and loaded.get("instructions") and loaded.get("name"):
+                        record["loaded_skill"] = {
+                            "name": loaded["name"], "revision": loaded.get("revision", ""),
+                        }
             if on_event:
                 await on_event({"type": "tool", "tool": {key: value for key, value in record.items() if key != "content"}})
             return record
@@ -353,6 +516,25 @@ class AgentRuntime:
         if len(tool_calls) <= 1:
             return [await run_one(tool_calls[0])] if tool_calls else []
         return list(await asyncio.gather(*(run_one(call) for call in tool_calls)))
+
+    def _record_episode_safe(
+        self, turn_kind: str, session_id: str, user_message: dict[str, Any] | None,
+        assistant_message: dict[str, Any] | None, task: str, outcome: str,
+        result: str, error: str, tool_chain: list[dict[str, Any]], trace_id: str,
+    ) -> None:
+        if turn_kind != "chat" or not self.episodes or not user_message:
+            return
+        try:
+            self.episodes.record(
+                session_id=session_id,
+                user_message_id=user_message["id"],
+                assistant_message_id=assistant_message["id"] if assistant_message else None,
+                task=task[:600], outcome=outcome, result=result[:1200], error=error[:300],
+                tool_names=[item["name"] for item in tool_chain if self.tools.get(item.get("name", ""))],
+                trace_id=trace_id,
+            )
+        except Exception:
+            logger.exception("failed to record task episode for trace %s", trace_id)
 
     @staticmethod
     def _record_llm(context: TurnContext, result) -> None:

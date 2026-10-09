@@ -178,12 +178,12 @@ class MemoryEngine:
         result = await self.remember(content, kind, importance, source, source_ref)
         return result.memory if result.action in {"created", "superseded"} else None
 
-    async def remember(self, content: str, kind: str, importance: int, source: str, source_ref: str | None = None) -> MemoryWriteResult:
-        result = await self._remember(content, kind, importance, source, source_ref)
+    async def remember(self, content: str, kind: str, importance: int, source: str, source_ref: str | None = None, *, require_source: bool = False) -> MemoryWriteResult:
+        result = await self._remember(content, kind, importance, source, source_ref, require_source=require_source)
         self._sync_markdown_layer(result, content=content, kind=kind, source_ref=source_ref)
         return result
 
-    async def _remember(self, content: str, kind: str, importance: int, source: str, source_ref: str | None = None) -> MemoryWriteResult:
+    async def _remember(self, content: str, kind: str, importance: int, source: str, source_ref: str | None = None, *, require_source: bool = False) -> MemoryWriteResult:
         content = content.strip()
         if not content:
             return MemoryWriteResult("skipped", None, reason="empty content")
@@ -195,7 +195,7 @@ class MemoryEngine:
             if item["kind"] == kind and canonical == self._canonical(item["content"]):
                 if source_ref and self.store.has_memory_operation(source_ref, item["id"]):
                     return MemoryWriteResult("skipped", item, item["id"], "source already applied")
-                reinforced = self.store.reinforce_memory(item["id"], source_ref)
+                reinforced = self.store.reinforce_memory(item["id"], source_ref, require_source=require_source)
                 return MemoryWriteResult("reinforced", reinforced, item["id"], "exact match")
 
         vector: list[float] | None = None
@@ -240,12 +240,12 @@ class MemoryEngine:
             if target and action == "reinforce" and float(target["relation_similarity"]) >= 0.78:
                 if source_ref and self.store.has_memory_operation(source_ref, target_id):
                     return MemoryWriteResult("skipped", target, target_id, "source already applied")
-                reinforced = self.store.reinforce_memory(target_id, source_ref)
+                reinforced = self.store.reinforce_memory(target_id, source_ref, require_source=require_source)
                 return MemoryWriteResult("reinforced", reinforced, target_id, decision.get("reason", ""))
             mutable_kinds = {"preference", "profile", "goal", "procedure"}
             if target and action == "supersede" and kind in mutable_kinds and float(target["relation_similarity"]) >= 0.55:
                 reason = decision.get("reason", "")
-                saved = self.store.add_memory(content, kind, importance, source, vector, target_id, reason, source_ref)
+                saved = self.store.add_memory(content, kind, importance, source, vector, target_id, reason, source_ref, require_source=require_source)
                 try:
                     self.store.temporal_invalidate(target_id, saved["id"])
                     organized = self.organize(content, kind)
@@ -262,13 +262,13 @@ class MemoryEngine:
             for item in related:
                 full = self.store.memory(item["id"])
                 if full and full.get("status") == "active" and kind in {"preference", "profile", "goal", "procedure"} and self._contradicts(content, full["content"]):
-                    saved = self.store.add_memory(content, kind, importance, source, vector, item["id"], "contradiction auto-supersede", source_ref)
+                    saved = self.store.add_memory(content, kind, importance, source, vector, item["id"], "contradiction auto-supersede", source_ref, require_source=require_source)
                     try:
                         self.store.temporal_invalidate(item["id"], saved["id"])
                         self.store.record_evolution(saved["id"], f"矛盾替代 {item['id']}: {content[:120]}")
                     except Exception: pass
                     return MemoryWriteResult("superseded", saved, item["id"], "contradiction auto-supersede")
-        saved = self.store.add_memory(content, kind, importance, source, vector, source_ref=source_ref)
+        saved = self.store.add_memory(content, kind, importance, source, vector, source_ref=source_ref, require_source=require_source)
         try:
             organized = self.organize(content, kind)
             with self.store.lock:
