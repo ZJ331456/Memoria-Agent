@@ -89,9 +89,11 @@ def test_key_rotation_restores_disabled_owner_and_audits_related_spaces(governan
 def test_cross_agent_review_read_isolation_and_audit(governance):
     store, layer = governance
     owner, reader, curator, outsider, space = _agents(layer)
+    session = store.create_session("来源对话")
+    message = store.add_message(session["id"], "user", "项目使用 SQLite 保存记忆")
     proposal = layer.propose(
         owner["id"], space["id"], "项目使用 SQLite 保存记忆",
-        "fact", 4, "storage.engine", "conversation", "message-123",
+        "fact", 4, "storage.engine", "conversation", message["id"],
     )
     assert proposal["status"] == "pending"
     assert proposal["conflict_memory_id"] is None
@@ -104,7 +106,7 @@ def test_cross_agent_review_read_isolation_and_audit(governance):
     memory = layer.approve(curator["id"], proposal["id"], reason="来源已核对")
     assert memory["action"] == "activate"
     assert memory["source_type"] == "conversation"
-    assert memory["source_ref"] == "message-123"
+    assert memory["source_ref"] == message["id"]
     assert memory["version"] == 1
     assert [item["id"] for item in layer.search(reader["id"], "SQLite", space["id"])] == [memory["id"]]
     assert layer.detail(reader["id"], memory["id"])["id"] == memory["id"]
@@ -126,7 +128,7 @@ def test_cross_agent_review_read_isolation_and_audit(governance):
     assert [item["action"] for item in events[:3]] == ["activate", "propose", "grant"]
     assert events[0]["actor_id"] == curator["id"]
     assert events[0]["reason"] == "来源已核对"
-    assert events[0]["source_ref"] == "message-123"
+    assert events[0]["source_ref"] == message["id"]
     with pytest.raises(GovernanceError) as error:
         layer.events(reader["id"], space["id"])
     _code(error, 403)

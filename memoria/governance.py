@@ -396,6 +396,19 @@ class MemoryGovernance:
     def _present_memory(cls, memory: dict[str, Any] | sqlite3.Row, timestamp: str) -> dict[str, Any]:
         return {**dict(memory), "effective_status": cls._effective_status(memory, timestamp)}
 
+    def _validate_source(self, source_type: str, source_ref: str | None, status: int = 422) -> None:
+        """Validate local references inside the same transaction as publication."""
+        if source_type in {"message", "conversation", "reviewed_conversation"}:
+            exists = source_ref and self.db.execute("SELECT 1 FROM messages WHERE id=?", (source_ref,)).fetchone()
+        elif source_type == "session":
+            exists = source_ref and self.db.execute("SELECT 1 FROM sessions WHERE id=?", (source_ref,)).fetchone()
+        elif source_type == "legacy_memory":
+            exists = source_ref and self.db.execute("SELECT 1 FROM memories WHERE id=? AND status='active'", (source_ref,)).fetchone()
+        else:
+            return  # Manual input and external references require curator verification.
+        if not exists:
+            raise GovernanceError(status, "本地来源不存在、已删除或已失效，请重新核对来源")
+
     def propose(
         self,
         actor_id: str,
@@ -444,6 +457,7 @@ class MemoryGovernance:
         }
         with self._transaction():
             self._access(actor_id, space_id, "contributor")
+            self._validate_source(source_type, source_ref)
             current = self.db.execute(
                 """SELECT content,kind,importance,source_type,source_ref,expires_at,id FROM governed_memories
                 WHERE space_id=? AND topic_key=? AND status='active'
@@ -531,10 +545,7 @@ class MemoryGovernance:
                 if exc.status_code != 403:
                     raise
                 raise GovernanceError(409, "提议人已禁用或失去该空间的写入权限") from exc
-            if proposal["source_type"] == "legacy_memory":
-                source = self.store.memory(proposal["source_ref"]) if proposal["source_ref"] else None
-                if not source or source["status"] != "active":
-                    raise GovernanceError(409, "原始记忆已删除或替代，请重新核对并导入")
+            self._validate_source(proposal["source_type"], proposal["source_ref"], status=409)
             timestamp = now()
             if proposal["expires_at"] and proposal["expires_at"] <= timestamp:
                 raise GovernanceError(409, "提议已过期，不能批准")
@@ -653,7 +664,12 @@ class MemoryGovernance:
     def search(
         self, actor_id: str, query: str = "", space_id: str | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
+        from collections import Counter
+        from .memory.engine import MemoryEngine
+
         limit = max(1, min(int(limit), 500))
+        query = query.strip()
+        tokens = MemoryEngine._tokens(MemoryEngine._lexical_query(query))
         with self.store.lock:
             if space_id:
                 self._access(actor_id, space_id, "reader")
@@ -663,15 +679,41 @@ class MemoryGovernance:
             if not spaces:
                 return []
             placeholders = ",".join("?" for _ in spaces)
+            # ACL and validity constrain SQL candidates BEFORE ranking or Top-K.
+            match = ""
+            params = [*spaces, now()]
+            if query:
+                # A short, contiguous fragment expresses a phrase lookup. Expanding
+                # "离线导出" into "导出" would return a different approved policy.
+                expand_query = len(query) > 8 or bool(re.search(r"\s", query))
+                terms = sorted(tokens)[:64] if expand_query else []
+                match = " AND (INSTR(LOWER(content),LOWER(?))>0"
+                params.append(query)
+                for term in terms:
+                    match += " OR INSTR(LOWER(content),?)>0"
+                    params.append(term)
+                match += ")"
+            candidate_limit = 2000 if query else limit
             rows = self.db.execute(
                 f"""SELECT * FROM governed_memories
                 WHERE space_id IN ({placeholders}) AND status='active'
-                  AND (expires_at IS NULL OR expires_at>?)
-                  AND INSTR(LOWER(content),LOWER(?))>0
+                  AND (expires_at IS NULL OR expires_at>?) {match}
                 ORDER BY importance DESC,approved_at DESC,id DESC LIMIT ?""",
-                (*spaces, now(), query.strip(), limit),
+                (*params, candidate_limit),
             ).fetchall()
-        return [dict(row) for row in rows]
+        result = [dict(row) for row in rows]
+        if not query or not result:
+            return result[:limit]
+        documents = {item["id"]: Counter(MemoryEngine._token_sequence(item["content"])) for item in result}
+        frequencies = Counter(token for document in documents.values() for token in document)
+        avg_len = sum(sum(doc.values()) for doc in documents.values()) / len(documents)
+        scores = {mid: MemoryEngine._bm25(tokens, doc, sum(doc.values()), avg_len, frequencies, len(documents))
+                  for mid, doc in documents.items()}
+        result.sort(key=lambda item: (query.casefold() in item["content"].casefold(), scores[item["id"]],
+                                     item["importance"], item["approved_at"]), reverse=True)
+        for rank, item in enumerate(result[:limit], 1):
+            item["retrieval"] = {"strategy": "acl_lexical_bm25", "rank": rank, "score": round(scores[item["id"]], 6)}
+        return result[:limit]
 
     def detail(self, actor_id: str, memory_id: str) -> dict[str, Any]:
         with self.store.lock:
