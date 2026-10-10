@@ -104,6 +104,7 @@ def test_keyless_loopback_main_is_ready_remote_is_not(tmp_path: Path):
         "configured": True,
         "api_key_set": False,
         "local": True,
+        "backend": "openai-local",
     }
     assert local.main.auth_headers()["Authorization"] == "Bearer local"
 

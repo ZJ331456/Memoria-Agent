@@ -56,13 +56,18 @@ def apply_overrides(settings: Settings, data: dict[str, Any] | None = None) -> S
 
 def public_models(settings: Settings) -> dict[str, Any]:
     def safe(value: ModelConfig, *, role: SlotRole) -> dict[str, Any]:
-        return {
+        from .llm.backends.resolve import backend_public_label
+
+        payload = {
             "model": value.model,
             "base_url": value.base_url,
             "configured": value.is_ready(role=role),
             "api_key_set": bool(value.api_key),
             "local": value.is_local_process() or (role == "llm" and value.is_local_http()),
         }
+        if role == "llm":
+            payload["backend"] = backend_public_label(value) if value.base_url else ""
+        return payload
 
     return {
         "main": safe(settings.main, role="llm"),

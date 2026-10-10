@@ -7,31 +7,23 @@ request_timeout_seconds = 90
 max_retries = 2
 
 # ---------------------------------------------------------------------------
-# [llm.main] 样例（下面默认启用「本地进程内」）
+# [llm.main]：业务侧统一走 OpenAI 兼容 HTTP（memoria/llm/backends/openai_http.py）
 #
-# A) 远程 API（OpenAI 兼容，需 api_key）
-# [llm.main]
-# model = "deepseek-v4-flash"
-# api_key = "${DEEPSEEK_API_KEY}"
-# base_url = "https://api.deepseek.com/v1"
-# multimodal = false
+# A) 远程 API
+#   model = "deepseek-v4-flash"
+#   api_key = "${DEEPSEEK_API_KEY}"
+#   base_url = "https://api.deepseek.com/v1"
 #
-# B) 本地进程内（推荐；无需另起服务，设备：local://cuda|cpu|auto）
-# [llm.main]
-# model = "model/Qwen3.5-2B"
-# api_key = ""
-# base_url = "local://cuda"
+# B) Windows 推荐：先起本仓库本地服务，再连 HTTP
+#   .\.venv\Scripts\python.exe scripts/serve_local_llm.py --model model/Qwen3.5-2B --device cuda --port 8080 --warmup
+#   （vLLM/SGLang 官方不支持原生 Windows，可用 WSL2；Ollama 亦可）
 #
-# C) 本地 OpenAI 兼容 HTTP 服务（llama.cpp / vLLM / Ollama）
-# [llm.main]
-# model = "model/Qwen3.5-2B"
-# api_key = ""
-# base_url = "http://127.0.0.1:8080/v1"
+# C) 进程内兜底（无 HTTP 服务时）：base_url = "local://cuda"
 # ---------------------------------------------------------------------------
 [llm.main]
 model = "model/Qwen3.5-2B"
 api_key = ""
-base_url = "local://cuda"
+base_url = "http://127.0.0.1:8080/v1"
 multimodal = false
 
 # [llm.fast] 仍可走远程轻量模型；也可同样改成另一个本地端点。

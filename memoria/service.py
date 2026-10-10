@@ -93,16 +93,25 @@ class AgentService:
         else:
             if self.embedder.is_local and self.embedder.enabled:
                 logger.info("本地 Embedding 预热完成")
-        if self.settings.main.is_local_process() and self.settings.main.is_ready(role="llm"):
-            logger.info("正在预热本地 LLM，首次启动需要加载模型")
-            try:
-                from .llm import ProviderError
+        if self.settings.main.is_ready(role="llm"):
+            from .llm import ProviderError
+            from .llm.backends.resolve import backend_public_label
 
-                await self.llm.chat([{"role": "user", "content": "ping"}], max_tokens=8)
-            except (ProviderError, RuntimeError, OSError, ImportError) as exc:
-                logger.warning("本地 LLM 启动预热失败：%s", exc)
-            else:
-                logger.info("本地 LLM 预热完成")
+            label = backend_public_label(self.settings.main)
+            if self.settings.main.is_local_process():
+                logger.info("正在预热进程内本地 LLM（%s）", label)
+                try:
+                    await self.llm.chat([{"role": "user", "content": "ping"}], max_tokens=8)
+                except (ProviderError, RuntimeError, OSError, ImportError) as exc:
+                    logger.warning("本地 LLM 启动预热失败：%s", exc)
+                else:
+                    logger.info("本地 LLM 预热完成")
+            elif self.settings.main.is_local_http():
+                logger.info(
+                    "主模型使用 OpenAI 兼容 HTTP（%s → %s）；请确保已启动 scripts/serve_local_llm.py 或 vLLM/SGLang/Ollama",
+                    label,
+                    self.settings.main.base_url,
+                )
         await self.mcp.start()
 
     async def stop_integrations(self) -> None:
