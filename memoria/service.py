@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -12,9 +13,12 @@ from .memory.episodic import EpisodicMemory
 from .memory.forgetting import ForgettingWorker
 from .mcp import McpHost
 from .models_config import public_models, save_model_overrides, test_model_slot
+from .memory.embedding import EmbeddingError
 from .runtime import AgentRuntime
 from .skills import SkillCatalog
 from .tools import ToolPresentation, build_registry
+
+logger = logging.getLogger(__name__)
 
 
 class AgentService:
@@ -79,6 +83,16 @@ class AgentService:
         self._busy_check = check
 
     async def start_integrations(self) -> None:
+        if self.embedder.is_local and self.embedder.enabled:
+            logger.info("正在预热本地 Embedding，首次启动需要加载模型")
+        try:
+            await self.embedder.warmup()
+        except EmbeddingError as exc:
+            # Keep setup available so the user can repair a missing model/device.
+            logger.warning("本地 Embedding 启动预热失败：%s", exc)
+        else:
+            if self.embedder.is_local and self.embedder.enabled:
+                logger.info("本地 Embedding 预热完成")
         await self.mcp.start()
 
     async def stop_integrations(self) -> None:

@@ -55,18 +55,19 @@ def apply_overrides(settings: Settings, data: dict[str, Any] | None = None) -> S
 
 
 def public_models(settings: Settings) -> dict[str, Any]:
-    def safe(value: ModelConfig) -> dict[str, Any]:
+    def safe(value: ModelConfig, *, local_embedding: bool = False) -> dict[str, Any]:
         return {
             "model": value.model,
             "base_url": value.base_url,
-            "configured": bool(value.api_key),
+            "configured": bool(value.model and value.base_url and
+                               (value.api_key or (local_embedding and value.base_url.startswith("local://")))),
             "api_key_set": bool(value.api_key),
         }
 
     return {
         "main": safe(settings.main),
         "fast": safe(settings.fast),
-        "embedding": safe(settings.embedding),
+        "embedding": safe(settings.embedding, local_embedding=True),
         "setup_needed": not bool(settings.main.api_key and settings.main.model and settings.main.base_url),
         "override_path": str(override_path(settings)),
     }
@@ -143,6 +144,17 @@ async def test_model_slot(settings: Settings, slot: str) -> dict[str, Any]:
     if slot not in {"main", "fast", "embedding"}:
         raise ValueError("slot 必须是 main、fast 或 embedding")
     config: ModelConfig = getattr(settings, slot)
+    if slot == "embedding" and config.base_url.startswith("local://"):
+        from .memory.embedding import EmbeddingClient, EmbeddingError
+        client = EmbeddingClient(config, min(settings.request_timeout_seconds, 60), max_retries=0)
+        try:
+            vector = await client.embed_query("用户喜欢喝茶")
+            if not vector:
+                raise EmbeddingError("本地模型未配置或未返回向量")
+            return {"ok": True, "slot": slot, "message": "本地 Embedding 编码正常",
+                    "dimension": len(vector), "namespace": client.namespace}
+        except EmbeddingError as exc:
+            return {"ok": False, "slot": slot, "message": str(exc)}
     if not (config.model and config.api_key and config.base_url):
         return {"ok": False, "slot": slot, "message": "模型未完整配置（需要 model、api_key、base_url）"}
     headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}

@@ -22,7 +22,8 @@
 |---|---|
 | [planner.py](planner.py) | `MemoryQueryPlanner` 门控、可选 fast 模型改写查询/类型/数量 |
 | [engine.py](engine.py) | `MemoryEngine` 写入去重、替代、纠正、关键词/BM25/可选向量检索、图扩展和时间查询 |
-| [embedding.py](embedding.py) | OpenAI-compatible `/embeddings` 请求、分批、超时及有限重试 |
+| [embedding.py](embedding.py) | 远程 `/embeddings` 或本地 BGE 分派，区分查询与文档编码、分批与超时 |
+| [local_bge.py](local_bge.py) | 中文 BGE small v1.5 的离线 CUDA/CPU 编码、模型指纹和有界串行队列；[配置说明](../../docs/本地Embedding配置.md) |
 | [worker.py](worker.py) | 会话结束后领取持久任务，提取候选并写入审核队列 |
 | [episodic.py](episodic.py) | `EpisodicMemory` 记录真实来源任务、相关性召回、固定保留、归档和事件 |
 | [forgetting.py](forgetting.py) | 后台情景 TTL/容量维护；取消后再关闭数据库 |

@@ -230,10 +230,12 @@ class Settings:
         return apply_overrides(settings)
 
     def public_dict(self) -> dict[str, Any]:
-        def safe(value: ModelConfig) -> dict[str, Any]:
-            return {"model": value.model, "base_url": value.base_url, "configured": bool(value.api_key)}
+        def safe(value: ModelConfig, *, local_embedding: bool = False) -> dict[str, Any]:
+            return {"model": value.model, "base_url": value.base_url,
+                    "configured": bool(value.model and value.base_url and
+                                       (value.api_key or (local_embedding and value.base_url.startswith("local://"))))}
         return {
-            "main": safe(self.main), "fast": safe(self.fast), "embedding": safe(self.embedding),
+            "main": safe(self.main), "fast": safe(self.fast), "embedding": safe(self.embedding, local_embedding=True),
             "vector_backend": self.vector_backend, "auth_enabled": bool(self.api_token),
             "rate_limit_per_minute": self.rate_limit_per_minute, "config_source": str(self.source),
             "skills_enabled": self.skills_enabled, "skills_directory": str(self.skills_directory),

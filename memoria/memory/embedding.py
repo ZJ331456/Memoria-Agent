@@ -4,6 +4,7 @@ import asyncio
 import logging
 import hashlib
 import math
+from functools import cached_property
 from typing import Any
 
 import httpx
@@ -18,7 +19,7 @@ class EmbeddingError(RuntimeError):
 
 
 class EmbeddingClient:
-    """Small OpenAI-compatible embedding client with bounded retries and batches."""
+    """Remote OpenAI embeddings or optional, offline local BGE inference."""
 
     def __init__(self, config: ModelConfig, timeout_seconds: float = 30, max_retries: int = 2, batch_size: int = 10):
         self.config = config
@@ -27,14 +28,33 @@ class EmbeddingClient:
         self.batch_size = max(1, min(batch_size, 64))
 
     @property
+    def is_local(self) -> bool:
+        return self.config.base_url.startswith("local://")
+
+    @cached_property
     def namespace(self) -> str:
+        if self.is_local:
+            from .local_bge import model_fingerprint, model_path
+            return "embedding-local:" + model_fingerprint(model_path(self.config.model))
         # Provider endpoint and model identify the vector space. Keys are excluded.
         identity = f"{self.config.base_url.rstrip('/')}|{self.config.model}"
         return "embedding:" + hashlib.sha256(identity.encode()).hexdigest()
 
     @property
     def enabled(self) -> bool:
-        return bool(self.config.model and self.config.api_key and self.config.base_url)
+        return bool(self.config.model and self.config.base_url and (self.is_local or self.config.api_key))
+
+    async def warmup(self) -> None:
+        """Load local weights before serving; remote providers are never called."""
+        if self.is_local and self.enabled:
+            startup_client = EmbeddingClient(self.config, max(120, self.timeout_seconds), max_retries=0)
+            await startup_client.embed("本地记忆模型预热")
+
+    async def embed_query(self, text: str) -> list[float] | None:
+        if self.is_local:
+            from .local_bge import QUERY_INSTRUCTION
+            text = QUERY_INSTRUCTION + text
+        return await self.embed(text)
 
     async def embed(self, text: str) -> list[float] | None:
         vectors = await self.embed_batch([text])
@@ -50,6 +70,18 @@ class EmbeddingClient:
         return result
 
     async def _request(self, texts: list[str]) -> list[list[float]]:
+        if self.is_local:
+            from .local_bge import get_encoder, model_path
+            device = self.config.base_url.removeprefix("local://").rstrip("/")
+            if device not in {"cuda", "cpu", "auto"}:
+                raise EmbeddingError("本地 Embedding 地址应为 local://cuda、local://cpu 或 local://auto")
+            try:
+                encoder = get_encoder(str(model_path(self.config.model)), device, self.namespace)
+                vectors = await encoder.encode(texts, self.timeout_seconds)
+                return self._vectors({"data": [{"index": i, "embedding": vector}
+                    for i, vector in enumerate(vectors)]}, len(texts))
+            except (RuntimeError, ValueError, OSError, ImportError, asyncio.TimeoutError) as exc:
+                raise EmbeddingError(f"本地 Embedding 失败：{exc}") from exc
         headers = {"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"}
         payload = {"model": self.config.model, "input": texts, "encoding_format": "float"}
         last_error: Exception | None = None

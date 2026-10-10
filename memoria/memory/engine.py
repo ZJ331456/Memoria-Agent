@@ -103,7 +103,8 @@ class MemoryEngine:
         if embedder and embedder.enabled:
             await self._backfill(items, limit=64)
             try:
-                query_vector = await asyncio.wait_for(embedder.embed(query), timeout=embedder.timeout_seconds + 1)
+                encode_query = getattr(embedder, "embed_query", embedder.embed)
+                query_vector = await asyncio.wait_for(encode_query(query), timeout=embedder.timeout_seconds + 1)
             except Exception as exc:
                 logger.warning("语义记忆召回降级为关键词召回: %s", type(exc).__name__)
 

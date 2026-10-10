@@ -68,6 +68,8 @@ enabled = true
 directory = "data/markdown"
 
 [memory.embedding]
+# 本地 BGE 可改为 model="model/bge-small-zh-v1.5"、base_url="local://cuda"，无需 API Key。
+# 独立环境、下载和 CPU/auto 选项见 docs/本地Embedding配置.md。
 model = "text-embedding-v3"
 api_key = "${DASHSCOPE_API_KEY}"
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"

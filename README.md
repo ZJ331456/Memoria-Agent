@@ -62,6 +62,8 @@ npm run build --prefix frontend
 
 打开 <http://127.0.0.1:2237>。首次进入会提示配置主模型的 **Model、Base URL 和 API Key**；可以在页面中测试连接。快速模型和 Embedding 模型可稍后配置。未配置 Embedding 时仍可使用词面记忆检索。
 
+Windows PowerShell 可直接使用 `.\.venv\Scripts\python.exe main.py` 启动。中文本地检索支持 BGE small zh v1.5；项目内模型目录、独立环境与 CUDA/CPU 配置见[本地 Embedding 配置](docs/本地Embedding配置.md)。
+
 想先体验共享记忆治理，可直接打开「共享治理」页；此流程不要求先配置模型。Agent 密钥只在页面内存中使用，刷新后需重新粘贴。
 
 模型设置保存在被 Git 忽略的 `data/models.override.toml`，API 不回显密钥。也可以复制 `config.example.toml` 为 `config.toml`，用环境变量配置模型和运行选项。
