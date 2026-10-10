@@ -550,6 +550,6 @@ class _FastSummarizer:
 
     async def complete(self, messages: list[dict[str, str]], model=None, max_tokens: int | None = None) -> str:
         selected = model
-        if selected is None and self.llm.settings.fast.model and self.llm.settings.fast.api_key:
-            selected = self.llm.settings.fast
+        if selected is None:
+            selected = self.llm.settings.preferred_chat_model(prefer_fast=True)
         return await self.llm.complete(messages, model=selected, max_tokens=max_tokens)

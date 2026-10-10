@@ -45,13 +45,15 @@ class LLMClient:
 
     async def chat(self, messages: list[dict[str, Any]], model: ModelConfig | None = None, max_tokens: int | None = None, tools: list[dict[str, Any]] | None = None) -> ChatResult:
         selected = model or self.settings.main
-        if not selected.api_key or not selected.base_url or not selected.model:
-            raise RuntimeError("主模型未完整配置，请检查 config.toml")
+        if not selected.is_ready(role="llm"):
+            raise RuntimeError("主模型未完整配置：远程需 model/base_url/api_key；本地可用 local://cuda 或 localhost OpenAI 兼容服务")
+        if selected.is_local_process():
+            return await self._chat_local(selected, messages, max_tokens or self.settings.max_tokens, tools)
         payload: dict[str, Any] = {"model": selected.model, "messages": messages, "max_tokens": max_tokens or self.settings.max_tokens, "stream": False}
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        headers = {"Authorization": f"Bearer {selected.api_key}", "Content-Type": "application/json"}
+        headers = selected.auth_headers()
         data, metrics = await self._post(selected, headers, payload)
         message = data["choices"][0]["message"]
         # DeepSeek reasoning 型模型在部分兼容端点只填 reasoning_content。
@@ -64,6 +66,45 @@ class LLMClient:
             calls.append({"id": call.get("id", ""), "name": fn.get("name", ""), "arguments": arguments})
         usage = {key:int(value) for key,value in (data.get("usage") or {}).items() if isinstance(value, int)}
         return ChatResult(str(message.get("content") or message.get("reasoning_content") or ""), calls, message, usage, metrics["duration_ms"], metrics["retries"], data["choices"][0].get("finish_reason"))
+
+    async def _chat_local(
+        self,
+        selected: ModelConfig,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        tools: list[dict[str, Any]] | None,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> ChatResult:
+        from .local_llm import get_local_llm, model_path
+
+        device = selected.base_url.removeprefix("local://").rstrip("/")
+        if device not in {"cuda", "cpu", "auto"}:
+            raise ProviderError("本地 LLM 地址应为 local://cuda、local://cpu 或 local://auto")
+        started = time.perf_counter()
+        try:
+            engine = get_local_llm(str(model_path(selected.model)), device)
+            data = await engine.chat(
+                messages,
+                tools,
+                max_tokens,
+                max(self.settings.request_timeout_seconds, 120),
+            )
+        except asyncio.TimeoutError as exc:
+            raise ProviderError("本地 LLM 推理超时") from exc
+        except Exception as exc:
+            raise ProviderError(f"本地 LLM 推理失败: {type(exc).__name__}: {exc}") from exc
+        content = str(data.get("content") or "")
+        if on_delta and content:
+            await on_delta(content)
+        return ChatResult(
+            content,
+            list(data.get("tool_calls") or []),
+            dict(data.get("raw_message") or {}),
+            {key: int(value) for key, value in (data.get("usage") or {}).items() if isinstance(value, int)},
+            int((time.perf_counter() - started) * 1000),
+            0,
+            data.get("finish_reason"),
+        )
 
     async def _post(self, selected: ModelConfig, headers: dict[str, str], payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
         last_error: Exception | None = None
@@ -91,12 +132,15 @@ class LLMClient:
 
     async def chat_stream(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, on_delta: Callable[[str], Awaitable[None]] | None = None) -> ChatResult:
         selected = self.settings.main
-        if not selected.api_key or not selected.base_url or not selected.model:
-            raise RuntimeError("主模型未完整配置，请检查 config.toml")
+        if not selected.is_ready(role="llm"):
+            raise RuntimeError("主模型未完整配置：远程需 model/base_url/api_key；本地可用 local://cuda 或 localhost OpenAI 兼容服务")
+        if selected.is_local_process():
+            # Transformers path generates fully then emits once; keeps tool-call parsing intact.
+            return await self._chat_local(selected, messages, self.settings.max_tokens, tools, on_delta=on_delta)
         payload: dict[str, Any] = {"model": selected.model, "messages": messages, "max_tokens": self.settings.max_tokens, "stream": True, "stream_options": {"include_usage": True}}
         if tools:
             payload.update({"tools": tools, "tool_choice": "auto"})
-        headers = {"Authorization": f"Bearer {selected.api_key}", "Content-Type": "application/json"}
+        headers = selected.auth_headers()
         started = time.perf_counter()
         last_error: Exception | None = None
         attempt = 0
@@ -191,7 +235,7 @@ class LLMClient:
     async def extract_memories(self, user_text: str, assistant_text: str) -> list[dict[str, Any]]:
         prompt = """从下面一轮对话中提取值得长期记忆、未来确实有帮助的用户事实或偏好。不要记临时问题、敏感凭据或助手说的话。仅返回 JSON 数组，每项格式 {\"content\":\"...\",\"kind\":\"preference|profile|fact|goal\",\"importance\":1到5}；没有则返回 []。"""
         try:
-            raw = await self.complete([{"role": "system", "content": prompt}, {"role": "user", "content": f"用户：{user_text}\n助手：{assistant_text}"}], self.settings.fast if self.settings.fast.api_key else self.settings.main, 600)
+            raw = await self.complete([{"role": "system", "content": prompt}, {"role": "user", "content": f"用户：{user_text}\n助手：{assistant_text}"}], self.settings.preferred_chat_model(prefer_fast=True), 600)
             match = re.search(r"\[[\s\S]*\]", raw)
             parsed = json.loads(match.group(0) if match else raw)
             return [x for x in parsed if isinstance(x, dict) and str(x.get("content", "")).strip()][:3]
@@ -218,7 +262,7 @@ class LLMClient:
         try:
             raw = await self.complete(
                 [{"role": "system", "content": system}, {"role": "user", "content": payload}],
-                self.settings.fast if self.settings.fast.api_key else self.settings.main,
+                self.settings.preferred_chat_model(prefer_fast=True),
                 320,
             )
             match = re.search(r"\{[\s\S]*\}", raw)
@@ -242,7 +286,7 @@ class LLMClient:
         compact = [{"role": item.get("role"), "content": str(item.get("content", ""))[:500]} for item in history[-6:]]
         raw = await self.complete(
             [{"role": "system", "content": system}, {"role": "user", "content": json.dumps({"query": query, "recent": compact}, ensure_ascii=False)}],
-            self.settings.fast if self.settings.fast.api_key else self.settings.main,
+            self.settings.preferred_chat_model(prefer_fast=True),
             220,
         )
         match = re.search(r"\{[\s\S]*\}", raw)

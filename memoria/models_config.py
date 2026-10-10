@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from .config import ModelConfig, Settings, _merge
+from .config import ModelConfig, Settings, SlotRole, _merge
 
 
 SLOT_PATHS = {
@@ -55,20 +55,20 @@ def apply_overrides(settings: Settings, data: dict[str, Any] | None = None) -> S
 
 
 def public_models(settings: Settings) -> dict[str, Any]:
-    def safe(value: ModelConfig, *, local_embedding: bool = False) -> dict[str, Any]:
+    def safe(value: ModelConfig, *, role: SlotRole) -> dict[str, Any]:
         return {
             "model": value.model,
             "base_url": value.base_url,
-            "configured": bool(value.model and value.base_url and
-                               (value.api_key or (local_embedding and value.base_url.startswith("local://")))),
+            "configured": value.is_ready(role=role),
             "api_key_set": bool(value.api_key),
+            "local": value.is_local_process() or (role == "llm" and value.is_local_http()),
         }
 
     return {
-        "main": safe(settings.main),
-        "fast": safe(settings.fast),
-        "embedding": safe(settings.embedding, local_embedding=True),
-        "setup_needed": not bool(settings.main.api_key and settings.main.model and settings.main.base_url),
+        "main": safe(settings.main, role="llm"),
+        "fast": safe(settings.fast, role="llm"),
+        "embedding": safe(settings.embedding, role="embedding"),
+        "setup_needed": not settings.main.is_ready(role="llm"),
         "override_path": str(override_path(settings)),
     }
 
@@ -144,7 +144,8 @@ async def test_model_slot(settings: Settings, slot: str) -> dict[str, Any]:
     if slot not in {"main", "fast", "embedding"}:
         raise ValueError("slot 必须是 main、fast 或 embedding")
     config: ModelConfig = getattr(settings, slot)
-    if slot == "embedding" and config.base_url.startswith("local://"):
+    role: SlotRole = "embedding" if slot == "embedding" else "llm"
+    if slot == "embedding" and config.is_local_process():
         from .memory.embedding import EmbeddingClient, EmbeddingError
         client = EmbeddingClient(config, min(settings.request_timeout_seconds, 60), max_retries=0)
         try:
@@ -155,9 +156,28 @@ async def test_model_slot(settings: Settings, slot: str) -> dict[str, Any]:
                     "dimension": len(vector), "namespace": client.namespace}
         except EmbeddingError as exc:
             return {"ok": False, "slot": slot, "message": str(exc)}
-    if not (config.model and config.api_key and config.base_url):
-        return {"ok": False, "slot": slot, "message": "模型未完整配置（需要 model、api_key、base_url）"}
-    headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
+    if role == "llm" and config.is_local_process():
+        from .llm import LLMClient, ProviderError
+        try:
+            result = await LLMClient(settings).chat(
+                [{"role": "user", "content": "ping"}],
+                model=config,
+                max_tokens=8,
+            )
+            return {
+                "ok": True,
+                "slot": slot,
+                "message": "本地 LLM 推理正常",
+                "preview": (result.content or "")[:80],
+                "device": config.base_url.removeprefix("local://"),
+            }
+        except (ProviderError, RuntimeError, OSError, ImportError) as exc:
+            return {"ok": False, "slot": slot, "message": str(exc)}
+    if not config.is_ready(role=role):
+        if role == "llm" and config.model and config.base_url and not config.api_key:
+            return {"ok": False, "slot": slot, "message": "远程模型需要 API Key；本地可用 local://cuda 或 localhost OpenAI 兼容服务"}
+        return {"ok": False, "slot": slot, "message": "模型未完整配置（需要 model、base_url；远程还需 api_key）"}
+    headers = config.auth_headers()
     timeout = httpx.Timeout(min(settings.request_timeout_seconds, 30))
     async with httpx.AsyncClient(timeout=timeout) as client:
         if slot == "embedding":
@@ -179,4 +199,5 @@ async def test_model_slot(settings: Settings, slot: str) -> dict[str, Any]:
     if response.status_code >= 400:
         detail = response.text[:300]
         return {"ok": False, "slot": slot, "status_code": response.status_code, "message": detail}
-    return {"ok": True, "slot": slot, "status_code": response.status_code, "message": "连通性正常"}
+    message = "本地 OpenAI 兼容服务连通正常" if config.is_local_http() else "连通性正常"
+    return {"ok": True, "slot": slot, "status_code": response.status_code, "message": message}

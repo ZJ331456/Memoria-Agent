@@ -5,16 +5,31 @@ import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from .memory.layer_settings import MemoryLayerSettings
 
 _ENV = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+SlotRole = Literal["llm", "embedding"]
 
 
 def _resolve(value: str) -> str:
     return _ENV.sub(lambda m: os.getenv(m.group(1), ""), value)
+
+
+def is_loopback_base_url(base_url: str) -> bool:
+    """True for OpenAI-compatible local servers on loopback (not local:// process backends)."""
+    raw = (base_url or "").strip()
+    if not raw or raw.startswith("local://"):
+        return False
+    try:
+        parsed = urlparse(raw if "://" in raw else f"http://{raw}")
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".localhost")
 
 
 def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -57,6 +72,31 @@ class ModelConfig:
     model: str
     api_key: str
     base_url: str
+
+    def is_local_process(self) -> bool:
+        return self.base_url.startswith("local://")
+
+    def is_local_http(self) -> bool:
+        return is_loopback_base_url(self.base_url)
+
+    def is_ready(self, *, role: SlotRole = "llm") -> bool:
+        """Remote slots need an API key; local backends may omit it."""
+        if not (self.model and self.base_url):
+            return False
+        if self.api_key:
+            return True
+        if self.is_local_process() and role in {"embedding", "llm"}:
+            return True
+        if role == "llm" and self.is_local_http():
+            return True
+        return False
+
+    def auth_headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        token = self.api_key or ("local" if self.is_local_http() else "")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
 
 @dataclass(slots=True)
@@ -229,13 +269,22 @@ class Settings:
 
         return apply_overrides(settings)
 
+    def preferred_chat_model(self, prefer_fast: bool = False) -> ModelConfig:
+        if prefer_fast and self.fast.is_ready(role="llm"):
+            return self.fast
+        return self.main
+
     def public_dict(self) -> dict[str, Any]:
-        def safe(value: ModelConfig, *, local_embedding: bool = False) -> dict[str, Any]:
-            return {"model": value.model, "base_url": value.base_url,
-                    "configured": bool(value.model and value.base_url and
-                                       (value.api_key or (local_embedding and value.base_url.startswith("local://"))))}
+        def safe(value: ModelConfig, *, role: SlotRole) -> dict[str, Any]:
+            return {
+                "model": value.model,
+                "base_url": value.base_url,
+                "configured": value.is_ready(role=role),
+                "local": value.is_local_process() or (role == "llm" and value.is_local_http()),
+            }
         return {
-            "main": safe(self.main), "fast": safe(self.fast), "embedding": safe(self.embedding, local_embedding=True),
+            "main": safe(self.main, role="llm"), "fast": safe(self.fast, role="llm"),
+            "embedding": safe(self.embedding, role="embedding"),
             "vector_backend": self.vector_backend, "auth_enabled": bool(self.api_token),
             "rate_limit_per_minute": self.rate_limit_per_minute, "config_source": str(self.source),
             "skills_enabled": self.skills_enabled, "skills_directory": str(self.skills_directory),
@@ -244,7 +293,7 @@ class Settings:
             "drift_enabled": self.drift_enabled,
             "markdown_enabled": self.markdown_enabled, "markdown_directory": str(self.markdown_directory),
             "memory_layers": self.memory_layers.public_dict() if self.memory_layers else None,
-            "setup_needed": not bool(self.main.api_key and self.main.model and self.main.base_url),
+            "setup_needed": not self.main.is_ready(role="llm"),
         }
 
 

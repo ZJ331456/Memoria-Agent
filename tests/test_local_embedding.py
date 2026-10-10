@@ -69,15 +69,16 @@ def test_local_model_is_configured_without_api_key(tmp_path):
     assert settings.public_dict()["embedding"]["configured"]
     assert public_models(settings)["embedding"] == {
         "model": str(model).replace("\\", "/"), "base_url": "local://cpu",
-        "configured": True, "api_key_set": False,
+        "configured": True, "api_key_set": False, "local": True,
     }
     assert not EmbeddingClient(ModelConfig("remote", "", "https://example.test/v1")).enabled
-    # Only the embedding slot supports a keyless local:// backend.
+    # Process-local local:// is valid for LLM and embedding when model+device are set.
     settings.main = settings.fast = ModelConfig(str(model), "", "local://cpu")
-    assert not settings.public_dict()["main"]["configured"]
-    assert not settings.public_dict()["fast"]["configured"]
-    assert not public_models(settings)["main"]["configured"]
-    assert not public_models(settings)["fast"]["configured"]
+    assert settings.public_dict()["main"]["configured"]
+    assert settings.public_dict()["fast"]["configured"]
+    assert public_models(settings)["main"]["configured"]
+    assert public_models(settings)["fast"]["configured"]
+    assert public_models(settings)["main"]["local"] is True
 
 
 @pytest.mark.parametrize("config", [

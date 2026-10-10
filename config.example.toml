@@ -6,12 +6,35 @@ provider = "openai"
 request_timeout_seconds = 90
 max_retries = 2
 
+# ---------------------------------------------------------------------------
+# [llm.main] 样例（下面默认启用「本地进程内」）
+#
+# A) 远程 API（OpenAI 兼容，需 api_key）
+# [llm.main]
+# model = "deepseek-v4-flash"
+# api_key = "${DEEPSEEK_API_KEY}"
+# base_url = "https://api.deepseek.com/v1"
+# multimodal = false
+#
+# B) 本地进程内（推荐；无需另起服务，设备：local://cuda|cpu|auto）
+# [llm.main]
+# model = "model/Qwen3.5-2B"
+# api_key = ""
+# base_url = "local://cuda"
+#
+# C) 本地 OpenAI 兼容 HTTP 服务（llama.cpp / vLLM / Ollama）
+# [llm.main]
+# model = "model/Qwen3.5-2B"
+# api_key = ""
+# base_url = "http://127.0.0.1:8080/v1"
+# ---------------------------------------------------------------------------
 [llm.main]
-model = "deepseek-v4-flash"
-api_key = "${DEEPSEEK_API_KEY}"
-base_url = "https://api.deepseek.com/v1"
+model = "model/Qwen3.5-2B"
+api_key = ""
+base_url = "local://cuda"
 multimodal = false
 
+# [llm.fast] 仍可走远程轻量模型；也可同样改成另一个本地端点。
 [llm.fast]
 model = "qwen3.6-flash"
 api_key = "${DASHSCOPE_API_KEY}"
@@ -67,12 +90,22 @@ engine = ""
 enabled = true
 directory = "data/markdown"
 
+# ---------------------------------------------------------------------------
+# [memory.embedding] 样例：二选一（下面默认启用「本地」）
+#
+# A) 远程 Embedding API
+# [memory.embedding]
+# model = "text-embedding-v3"
+# api_key = "${DASHSCOPE_API_KEY}"
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+#
+# B) 进程内本地 BGE（无需 API Key；设备可用 local://cuda | local://cpu | local://auto）
+#    下载与环境见 docs/本地Embedding配置.md
+# ---------------------------------------------------------------------------
 [memory.embedding]
-# 本地 BGE 可改为 model="model/bge-small-zh-v1.5"、base_url="local://cuda"，无需 API Key。
-# 独立环境、下载和 CPU/auto 选项见 docs/本地Embedding配置.md。
-model = "text-embedding-v3"
-api_key = "${DASHSCOPE_API_KEY}"
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+model = "model/bge-small-zh-v1.5"
+api_key = ""
+base_url = "local://cuda"
 
 [memory.retrieval]
 # auto 会优先使用可选 sqlite-vec，未安装时回退 JSON 向量扫描。
