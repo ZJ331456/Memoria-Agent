@@ -18,7 +18,8 @@ def test_session_and_memory_crud(tmp_path: Path):
     config = tmp_path / "config.toml"
     config.write_text(
         f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n'''
-        f'''[storage]\ndatabase="{tmp_path / 'test.db'}"\n''',
+        f'''[storage]\ndatabase="{(tmp_path / 'test.db').as_posix()}"\n'''
+        '''[memory.markdown]\nenabled=false\n''',
         encoding="utf-8",
     )
     client = TestClient(create_app(config))
@@ -49,7 +50,8 @@ def test_user_correction_keeps_versions_and_can_restore(tmp_path: Path):
     config = tmp_path / "config.toml"
     config.write_text(
         f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n'''
-        f'''[storage]\ndatabase="{tmp_path / 'correction.db'}"\n''', encoding="utf-8",
+        f'''[storage]\ndatabase="{(tmp_path / 'correction.db').as_posix()}"\n'''
+        '''[memory.markdown]\nenabled=false\n''', encoding="utf-8",
     )
     client = TestClient(create_app(config))
     original = client.post("/api/memories", json={"content": "用户喜欢红茶", "kind": "preference", "importance": 3}).json()["memory"]
@@ -103,7 +105,7 @@ def test_automatic_supersede_does_not_replace_user_correction(tmp_path: Path):
 
 def test_openapi_and_tool_debug(tmp_path: Path):
     config = tmp_path / "config.toml"
-    config.write_text(f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n[storage]\ndatabase="{tmp_path / 'api.db'}"\n''', encoding="utf-8")
+    config.write_text(f'''[llm.main]\nmodel="test"\napi_key="x"\nbase_url="http://example.test/v1"\n[storage]\ndatabase="{(tmp_path / 'api.db').as_posix()}"\n[memory.markdown]\nenabled=false\n''', encoding="utf-8")
     client = TestClient(create_app(config))
     schema = client.get("/openapi.json").json()
     assert schema["info"]["version"] == "0.12.0"

@@ -34,7 +34,7 @@ model="old"
 api_key="old-key"
 base_url="http://old.test/v1"
 [storage]
-database="{tmp_path / 'override.db'}"
+database="{(tmp_path / 'override.db').as_posix()}"
 ''',
         encoding="utf-8",
     )
@@ -59,9 +59,9 @@ api_key="secret-key"
 base_url="http://example.test/v1"
 [memory.markdown]
 enabled=true
-directory="{markdown_dir}"
+directory="{markdown_dir.as_posix()}"
 [storage]
-database="{tmp_path / 'api.db'}"
+database="{(tmp_path / 'api.db').as_posix()}"
 ''',
         encoding="utf-8",
     )
