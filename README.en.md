@@ -47,7 +47,11 @@ Personal memory creation, replacement, correction, and source undo maintain vali
 
 ## Quick start
 
-You need **Python 3.11+**, **Node.js/npm**, and Git. Chat and automatic extraction also require an OpenAI-compatible model endpoint. These commands target Linux/macOS; on Windows, use WSL.
+You need **Python 3.11+**, **Node.js/npm**, and Git. Chat and automatic extraction need an OpenAI-compatible model endpoint (remote API or a local HTTP server). Shared-memory governance can run without a model.
+
+### 1. Install dependencies and build the frontend
+
+**Linux / macOS:**
 
 ```bash
 git clone https://github.com/ZJ331456/Memoria-Agent.git
@@ -57,14 +61,76 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 npm ci --prefix frontend
 npm run build --prefix frontend
-.venv/bin/python main.py
 ```
 
-Open <http://127.0.0.1:2237>. On first launch, the Setup page asks for the main model's **Model, Base URL, and API Key**, and lets you test the connection. Fast and embedding models can be configured later. Without an embedding model, lexical memory retrieval still works.
+**Windows PowerShell:**
 
-To try shared-memory governance first, open **共享治理** (Shared governance). This flow does not require a model. The page keeps an agent key in memory only; paste it again after a refresh.
+```powershell
+git clone https://github.com/ZJ331456/Memoria-Agent.git
+cd Memoria-Agent
 
-Model settings are saved in the Git-ignored `data/models.override.toml`; the API never echoes keys. You can also copy `config.example.toml` to `config.toml` and use environment variables for model and runtime settings.
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm ci --prefix frontend
+npm run build --prefix frontend
+```
+
+For local BGE embeddings, also install CUDA PyTorch and `requirements-local-embedding.txt`. See the [local Embedding guide](docs/本地Embedding配置.md) (Chinese).
+
+### 2. Configure the model (pick one)
+
+Copy the sample config (or use Setup in the UI, which writes `data/models.override.toml`):
+
+```bash
+cp config.example.toml config.toml   # Windows: Copy-Item config.example.toml config.toml
+```
+
+| Mode | `llm.main` essentials | Notes |
+| --- | --- | --- |
+| Remote API | `base_url` + `api_key` (e.g. DeepSeek) | Single process for chat |
+| Local HTTP (recommended, especially on Windows) | `model = "model/Qwen3.5-2B"`, `base_url = "http://127.0.0.1:8080/v1"`, API key optional | Start `serve_local_llm.py` first; same OpenAI-compatible client as remote |
+| In-process fallback | `base_url = "local://cuda"` (or `cpu` / `auto`) | No sidecar server; weights load inside Memoria |
+
+Local embedding example: `model = "model/bge-small-zh-v1.5"`, `base_url = "local://cuda"`. Without an embedding model, lexical retrieval still works.
+
+> **Note:** Official vLLM / SGLang do not support native Windows. On Windows use the local server below, WSL2, or Ollama. On Linux you can point `base_url` at a running vLLM/SGLang/Ollama endpoint.
+
+### 3. Start the app
+
+#### A. Remote API (one terminal)
+
+```bash
+.venv/bin/python main.py
+# Windows: .\.venv\Scripts\python.exe main.py
+```
+
+Open <http://127.0.0.1:2237>, fill in the main model under Setup, and test connectivity.
+
+#### B. Local model + OpenAI-compatible HTTP (two terminals)
+
+Put weights under `model/` (e.g. `model/Qwen3.5-2B`). **Start the inference server, then Memoria.**
+
+```powershell
+# Terminal 1: local OpenAI-compatible server (default http://127.0.0.1:8080/v1)
+.\.venv\Scripts\python.exe scripts/serve_local_llm.py --model model/Qwen3.5-2B --device cuda --port 8080 --warmup
+
+# Terminal 2: Memoria
+.\.venv\Scripts\python.exe main.py
+```
+
+On Linux/macOS, use `.venv/bin/python` instead. Ensure `base_url` is `http://127.0.0.1:8080/v1` in `config.toml` or the Setup page.
+
+#### C. In-process local LLM only (one terminal)
+
+Set `llm.main.base_url` to `local://cuda`, then:
+
+```powershell
+.\.venv\Scripts\python.exe main.py
+```
+
+First launch may warm up local Embedding / in-process LLM and take longer on cold start.
+
+To try shared-memory governance first, open **共享治理** (Shared governance); no model is required. Agent keys stay in page memory only—paste again after refresh. Secrets live in Git-ignored `data/models.override.toml` and are never echoed by the API.
 
 ## First use
 

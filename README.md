@@ -47,7 +47,11 @@ flowchart LR
 
 ## 快速开始
 
-需要 **Python 3.11+**、**Node.js/npm** 和 Git；使用聊天或自动提取时还需要一个 OpenAI 兼容的模型接口。以下命令适用于 Linux/macOS；Windows 可使用 WSL。
+需要 **Python 3.11+**、**Node.js/npm** 和 Git。聊天与自动提取需要 OpenAI 兼容的模型端点（远程 API，或本机 HTTP 服务）。共享记忆治理可不配置模型。
+
+### 1. 安装依赖并构建前端
+
+**Linux / macOS：**
 
 ```bash
 git clone https://github.com/ZJ331456/Memoria-Agent.git
@@ -57,16 +61,76 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 npm ci --prefix frontend
 npm run build --prefix frontend
-.venv/bin/python main.py
 ```
 
-打开 <http://127.0.0.1:2237>。首次进入会提示配置主模型的 **Model、Base URL 和 API Key**；可以在页面中测试连接。快速模型和 Embedding 模型可稍后配置。未配置 Embedding 时仍可使用词面记忆检索。
+**Windows PowerShell：**
 
-Windows PowerShell 可直接使用 `.\.venv\Scripts\python.exe main.py` 启动。中文本地检索支持 BGE small zh v1.5；项目内模型目录、独立环境与 CUDA/CPU 配置见[本地 Embedding 配置](docs/本地Embedding配置.md)。
+```powershell
+git clone https://github.com/ZJ331456/Memoria-Agent.git
+cd Memoria-Agent
 
-想先体验共享记忆治理，可直接打开「共享治理」页；此流程不要求先配置模型。Agent 密钥只在页面内存中使用，刷新后需重新粘贴。
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm ci --prefix frontend
+npm run build --prefix frontend
+```
 
-模型设置保存在被 Git 忽略的 `data/models.override.toml`，API 不回显密钥。也可以复制 `config.example.toml` 为 `config.toml`，用环境变量配置模型和运行选项。
+本地 Embedding（BGE）还需 CUDA 版 PyTorch 与 `requirements-local-embedding.txt`，见[本地 Embedding 配置](docs/本地Embedding配置.md)。
+
+### 2. 配置模型（二选一）
+
+复制示例配置后按需修改（也可用页面「设置」写入 `data/models.override.toml`）：
+
+```bash
+cp config.example.toml config.toml   # Windows: Copy-Item config.example.toml config.toml
+```
+
+| 方式 | `llm.main` 要点 | 说明 |
+| --- | --- | --- |
+| 远程 API | `base_url` + `api_key`（如 DeepSeek） | 单进程即可对话 |
+| 本地 HTTP（推荐，尤其 Windows） | `model = "model/Qwen3.5-2B"`，`base_url = "http://127.0.0.1:8080/v1"`，可无 Key | 先起本仓库 `serve_local_llm.py`；业务侧与远程同一套 OpenAI 兼容 HTTP |
+| 进程内兜底 | `base_url = "local://cuda"`（或 `cpu` / `auto`） | 无需另起服务；权重进 Memoria 进程 |
+
+Embedding 本地示例：`model = "model/bge-small-zh-v1.5"`，`base_url = "local://cuda"`。未配置 Embedding 时仍可词面检索。
+
+> **说明：** vLLM / SGLang 官方不支持原生 Windows；Windows 请用下方本机服务，或 WSL2 / Ollama。Linux 可将 `base_url` 指向已启动的 vLLM/SGLang/Ollama。
+
+### 3. 启动
+
+#### A. 远程 API（单终端）
+
+```bash
+.venv/bin/python main.py
+# Windows: .\.venv\Scripts\python.exe main.py
+```
+
+打开 <http://127.0.0.1:2237>，在「设置」填写主模型并测试连通。
+
+#### B. 本地模型 + OpenAI 兼容 HTTP（推荐两终端）
+
+权重放在项目 `model/`（如 `model/Qwen3.5-2B`）。**先起推理服务，再起 Memoria。**
+
+```powershell
+# 终端 1：本地 OpenAI 兼容服务（默认 http://127.0.0.1:8080/v1）
+.\.venv\Scripts\python.exe scripts/serve_local_llm.py --model model/Qwen3.5-2B --device cuda --port 8080 --warmup
+
+# 终端 2：Memoria 主服务
+.\.venv\Scripts\python.exe main.py
+```
+
+Linux / macOS 将解释器换成 `.venv/bin/python` 即可。确认 `config.toml` 或页面设置中 `base_url` 为 `http://127.0.0.1:8080/v1`。
+
+#### C. 仅进程内本地 LLM（单终端）
+
+将 `llm.main.base_url` 设为 `local://cuda` 后直接：
+
+```powershell
+.\.venv\Scripts\python.exe main.py
+```
+
+首次启动会预热本地 Embedding / 进程内 LLM，耗时取决于机器。
+
+想先体验共享记忆治理，可直接打开「共享治理」页，无需模型。Agent 密钥只在页面内存中使用，刷新后需重新粘贴。模型密钥保存在 Git 忽略的 `data/models.override.toml`，API 永不回显。
 
 ## 第一次使用
 
