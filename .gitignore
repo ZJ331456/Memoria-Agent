@@ -7,6 +7,8 @@ config.toml
 
 # 运行时数据
 data/
+# 下载到项目内的本地模型权重与缓存
+model/
 *.db
 *.db-shm
 *.db-wal
@@ -40,3 +42,10 @@ pnpm-debug.log*
 .DS_Store
 *.log
 *.pid
+
+# Cursor / SpecStory 本地索引与会话
+.cursorindexingignore
+.specstory/
+
+# 本地克隆的参考项目（不入库）
+related-projects/
